@@ -1,0 +1,60 @@
+#!/bin/bash
+# spawner - Spawner v2 CLI wrapper
+# Invokes spawner.ps1 with elevated privileges
+#
+# Usage:
+#   ./spawner spawn Lab4
+#   ./spawner spawn Lab4 --template pai-clone
+#   ./spawner respawn Lab4 --cli
+#   ./spawner despawn Lab4 --force
+#   ./spawner cospawn Lab5 --from Lab4
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PS_SCRIPT="$SCRIPT_DIR/spawner.ps1"
+
+# Check if PowerShell script exists
+if [[ ! -f "$PS_SCRIPT" ]]; then
+    echo "ERROR: spawner.ps1 not found at $PS_SCRIPT"
+    exit 1
+fi
+
+# Convert to Windows path
+PS_SCRIPT_WIN=$(cygpath -w "$PS_SCRIPT" 2>/dev/null || echo "$PS_SCRIPT")
+
+# Build argument string
+ARGS=""
+for arg in "$@"; do
+    # Quote arguments with spaces
+    if [[ "$arg" == *" "* ]]; then
+        ARGS="$ARGS \"$arg\""
+    else
+        ARGS="$ARGS $arg"
+    fi
+done
+
+# Show help if no arguments
+if [[ $# -eq 0 ]]; then
+    ARGS="help"
+fi
+
+# Run PowerShell elevated
+# Using Start-Process with -Verb RunAs for elevation
+powershell.exe -NoProfile -Command "
+    \$scriptPath = '$PS_SCRIPT_WIN'
+    \$arguments = '$ARGS'.Trim()
+
+    # Check if already admin
+    \$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+    if (\$isAdmin) {
+        # Already admin, run directly
+        & \$scriptPath \$arguments.Split(' ')
+    } else {
+        # Need elevation
+        Write-Host 'Requesting administrator privileges...' -ForegroundColor Yellow
+        \$argString = \"-NoProfile -ExecutionPolicy Bypass -File `\"\$scriptPath`\" \$arguments\"
+        Start-Process powershell -ArgumentList \$argString -Verb RunAs -Wait
+    }
+"
+
+exit $?

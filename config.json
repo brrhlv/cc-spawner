@@ -1,0 +1,35 @@
+{
+  "version": "2.0",
+  "description": "cc-spawner - Windows user environment management for Claude Code testing",
+  "defaults": {
+    "template": "vanilla",
+    "password": "Spawn12345",
+    "nodeVersion": "22"
+  },
+  "despawn": {
+    "backup": true,
+    "confirm": true
+  },
+  "dependencies": {
+    "nvmVersion": "1.2.2",
+    "nodeVersion": "22.12.0"
+  },
+  "templates": {
+    "vanilla": {
+      "description": "Stock Claude Code - no PAI, no hooks, no skills",
+      "path": "templates/vanilla/.claude"
+    }
+  },
+  "categories": {
+    "lab": {
+      "description": "Testing environments - reset often, experimental",
+      "password": "Lab12345",
+      "defaultTemplate": "vanilla"
+    },
+    "dev": {
+      "description": "Automation environments - vanilla Claude for scripts/agents",
+      "password": "Dev12345",
+      "defaultTemplate": "vanilla"
+    }
+  }
+}

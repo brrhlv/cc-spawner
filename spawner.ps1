@@ -1,0 +1,896 @@
+# spawner.ps1 - Spawner v2: Simplified User Environment Management
+# Usage: .\spawner.ps1 <command> <username> [options]
+#
+# Commands:
+#   spawn <username>              Create ready-to-use user
+#   respawn <username>            Recreate user fresh (or --cli for config only)
+#   despawn <username>            Delete user
+#   cospawn <username> --from <source>  Copy from another user
+#
+# Examples:
+#   .\spawner.ps1 spawn Lab4
+#   .\spawner.ps1 spawn Lab4 --template pai-clone
+#   .\spawner.ps1 respawn Lab4 --cli
+#   .\spawner.ps1 despawn Lab4 --force
+#   .\spawner.ps1 cospawn Lab5 --from Lab4
+
+param(
+    [Parameter(Position=0)]
+    [ValidateSet("spawn", "respawn", "despawn", "cospawn", "help")]
+    [string]$Command = "help",
+
+    [Parameter(Position=1)]
+    [string]$Username,
+
+    [string]$Template,
+    [string]$Password,
+    [string]$From,
+    [switch]$Cli,
+    [switch]$Full,
+    [switch]$Force,
+    [switch]$NoBackup,
+    [switch]$Quiet,
+    [switch]$Help
+)
+
+$ErrorActionPreference = "Stop"
+$SpawnerRoot = $PSScriptRoot
+$ConfigPath = Join-Path $SpawnerRoot "config.json"
+$ManifestPath = Join-Path $SpawnerRoot "manifest.json"
+$DepsPath = Join-Path $SpawnerRoot "dependencies"
+$LogsPath = Join-Path $SpawnerRoot "logs"
+$BackupsPath = Join-Path $SpawnerRoot "backups"
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+function Write-Log {
+    param([string]$Message, [string]$Level = "INFO")
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logLine = "[$timestamp] [$Level] $Message"
+
+    if (-not $Quiet) {
+        $color = switch ($Level) {
+            "ERROR" { "Red" }
+            "WARN"  { "Yellow" }
+            "OK"    { "Green" }
+            "STEP"  { "Cyan" }
+            default { "White" }
+        }
+        Write-Host $logLine -ForegroundColor $color
+    }
+
+    # Append to log file
+    $logFile = Join-Path $LogsPath "spawner-$(Get-Date -Format 'yyyy-MM-dd').log"
+    if (-not (Test-Path $LogsPath)) { New-Item -ItemType Directory -Path $LogsPath -Force | Out-Null }
+    Add-Content -Path $logFile -Value $logLine
+}
+
+function ConvertTo-SecureStringDirect {
+    param([string]$PlainText)
+    $secure = New-Object System.Security.SecureString
+    foreach ($char in $PlainText.ToCharArray()) {
+        $secure.AppendChar($char)
+    }
+    $secure.MakeReadOnly()
+    return $secure
+}
+
+function Test-AdminPrivileges {
+    $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if (-not $isAdmin) {
+        Write-Log "This command must be run as Administrator" "ERROR"
+        exit 1
+    }
+}
+
+function Get-Config {
+    if (Test-Path $ConfigPath) {
+        return Get-Content $ConfigPath -Raw | ConvertFrom-Json
+    }
+    Write-Log "Config file not found: $ConfigPath" "ERROR"
+    exit 1
+}
+
+function Get-Manifest {
+    if (Test-Path $ManifestPath) {
+        return Get-Content $ManifestPath -Raw | ConvertFrom-Json
+    }
+    # Return empty manifest structure
+    return @{
+        version = "2.0"
+        created = (Get-Date -Format "yyyy-MM-dd")
+        updated = (Get-Date -Format "yyyy-MM-dd")
+        users = @{}
+    } | ConvertTo-Json | ConvertFrom-Json
+}
+
+function Save-Manifest {
+    param($Manifest)
+    $Manifest.updated = (Get-Date -Format "yyyy-MM-dd")
+    $Manifest | ConvertTo-Json -Depth 10 | Out-File $ManifestPath -Encoding UTF8 -Force
+}
+
+function Get-CategoryFromUsername {
+    param([string]$Username)
+    switch -Regex ($Username) {
+        "^Lab" { return "lab" }
+        "^Dev" { return "dev" }
+        default { return "lab" }
+    }
+}
+
+function Get-PasswordForUser {
+    param([string]$Username, $Config)
+    $category = Get-CategoryFromUsername $Username
+    if ($Config.categories.$category -and $Config.categories.$category.password) {
+        return $Config.categories.$category.password
+    }
+    return $Config.defaults.password
+}
+
+# ============================================================================
+# DEPENDENCIES MANAGEMENT
+# ============================================================================
+
+function Ensure-Dependencies {
+    param($Config)
+
+    $downloadedMarker = Join-Path $DepsPath ".downloaded"
+
+    if (Test-Path $downloadedMarker) {
+        Write-Log "Dependencies already cached" "INFO"
+        return $true
+    }
+
+    Write-Log "Downloading dependencies (first-time setup)..." "STEP"
+
+    if (-not (Test-Path $DepsPath)) {
+        New-Item -ItemType Directory -Path $DepsPath -Force | Out-Null
+    }
+
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+    # Download nvm-noinstall.zip
+    $nvmVersion = $Config.dependencies.nvmVersion
+    $nvmZipUrl = "https://github.com/coreybutler/nvm-windows/releases/download/$nvmVersion/nvm-noinstall.zip"
+    $nvmZipPath = Join-Path $DepsPath "nvm-noinstall.zip"
+
+    try {
+        Write-Log "  Downloading nvm-windows $nvmVersion..." "INFO"
+        Invoke-WebRequest -Uri $nvmZipUrl -OutFile $nvmZipPath -UseBasicParsing
+    } catch {
+        Write-Log "Failed to download nvm-windows: $($_.Exception.Message)" "ERROR"
+        return $false
+    }
+
+    # Download Node.js
+    $nodeVersion = $Config.dependencies.nodeVersion
+    $nodeZipUrl = "https://nodejs.org/dist/v$nodeVersion/node-v$nodeVersion-win-x64.zip"
+    $nodeZipPath = Join-Path $DepsPath "node-v$nodeVersion-win-x64.zip"
+
+    try {
+        Write-Log "  Downloading Node.js $nodeVersion..." "INFO"
+        Invoke-WebRequest -Uri $nodeZipUrl -OutFile $nodeZipPath -UseBasicParsing
+    } catch {
+        Write-Log "Failed to download Node.js: $($_.Exception.Message)" "ERROR"
+        return $false
+    }
+
+    # Create marker file
+    "downloaded=$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Out-File $downloadedMarker -Encoding UTF8
+    Write-Log "Dependencies cached successfully" "OK"
+    return $true
+}
+
+function Install-NodeForUser {
+    param(
+        [string]$Username,
+        [string]$UserHome,
+        $Config
+    )
+
+    $nvmRoot = "$UserHome\AppData\Roaming\nvm"
+    $nodejsPath = "$UserHome\AppData\Roaming\nodejs"
+    $nodeVersion = $Config.dependencies.nodeVersion
+
+    Write-Log "Installing portable Node.js for $Username..." "STEP"
+
+    try {
+        # Ensure parent directories exist
+        $appDataRoaming = "$UserHome\AppData\Roaming"
+        if (-not (Test-Path $appDataRoaming)) {
+            New-Item -ItemType Directory -Path $appDataRoaming -Force | Out-Null
+        }
+
+        # Remove existing and recreate clean
+        if (Test-Path $nvmRoot) { Remove-Item $nvmRoot -Recurse -Force -ErrorAction SilentlyContinue }
+        if (Test-Path $nodejsPath) { Remove-Item $nodejsPath -Recurse -Force -ErrorAction SilentlyContinue }
+        New-Item -ItemType Directory -Path $nvmRoot -Force | Out-Null
+        New-Item -ItemType Directory -Path $nodejsPath -Force | Out-Null
+
+        # Extract nvm
+        $nvmZipPath = Join-Path $DepsPath "nvm-noinstall.zip"
+        Write-Log "  Extracting nvm-windows..." "INFO"
+        Expand-Archive -Path $nvmZipPath -DestinationPath $nvmRoot -Force
+
+        # Create nvm settings
+        $nvmSettings = @"
+root: $nvmRoot
+path: $nodejsPath
+proxy: none
+"@
+        $nvmSettings | Out-File "$nvmRoot\settings.txt" -Encoding ASCII -Force
+
+        # Extract Node.js to temp then copy (robocopy is more reliable than Move-Item)
+        $nodeZipPath = Join-Path $DepsPath "node-v$nodeVersion-win-x64.zip"
+        $tempNodePath = "$env:TEMP\node-extract-$Username"
+
+        Write-Log "  Extracting Node.js $nodeVersion..." "INFO"
+        if (Test-Path $tempNodePath) { Remove-Item $tempNodePath -Recurse -Force -ErrorAction SilentlyContinue }
+        Expand-Archive -Path $nodeZipPath -DestinationPath $tempNodePath -Force
+
+        # Find the extracted folder (node-v22.12.0-win-x64)
+        $extractedFolder = Get-ChildItem $tempNodePath -Directory | Select-Object -First 1
+        if (-not $extractedFolder) {
+            throw "Could not find extracted Node.js folder in $tempNodePath"
+        }
+
+        # Use robocopy for reliable copying
+        $robocopyArgs = @($extractedFolder.FullName, $nodejsPath, "/MIR", "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS")
+        $result = Start-Process -FilePath "robocopy.exe" -ArgumentList $robocopyArgs -Wait -PassThru -NoNewWindow
+        if ($result.ExitCode -gt 7) {
+            throw "robocopy failed with exit code $($result.ExitCode)"
+        }
+
+        # Cleanup temp
+        Remove-Item $tempNodePath -Recurse -Force -ErrorAction SilentlyContinue
+
+        # Also copy to nvm's version folder for compatibility
+        $nvmNodePath = "$nvmRoot\v$nodeVersion"
+        New-Item -ItemType Directory -Path $nvmNodePath -Force | Out-Null
+        $robocopyArgs = @($nodejsPath, $nvmNodePath, "/MIR", "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS")
+        Start-Process -FilePath "robocopy.exe" -ArgumentList $robocopyArgs -Wait -NoNewWindow | Out-Null
+
+        Write-Log "  Node.js installed at $nodejsPath" "OK"
+        return $true
+    } catch {
+        Write-Log "  Failed to install Node.js: $($_.Exception.Message)" "ERROR"
+        return $false
+    }
+}
+
+function Install-ClaudeCliForUser {
+    param(
+        [string]$Username,
+        [string]$UserHome,
+        $Config
+    )
+
+    $nodejsPath = "$UserHome\AppData\Roaming\nodejs"
+    $npmPath = "$nodejsPath\npm.cmd"
+    $npmGlobalPath = "$UserHome\AppData\Roaming\npm"
+
+    Write-Log "Installing Claude Code CLI..." "STEP"
+
+    # Ensure npm global directory exists
+    New-Item -ItemType Directory -Path $npmGlobalPath -Force | Out-Null
+
+    # Create .npmrc to set prefix
+    $npmrc = "prefix=$npmGlobalPath"
+    $npmrc | Out-File "$UserHome\.npmrc" -Encoding UTF8 -Force
+
+    # Run npm install with proper environment
+    $env:PATH = "$nodejsPath;$npmGlobalPath;$env:PATH"
+    $env:npm_config_prefix = $npmGlobalPath
+
+    try {
+        Write-Log "  Running npm install -g @anthropic-ai/claude-code..." "INFO"
+        $result = & $npmPath install -g "@anthropic-ai/claude-code" 2>&1
+
+        # Verify installation
+        $claudePath = Join-Path $npmGlobalPath "claude.cmd"
+        if (Test-Path $claudePath) {
+            Write-Log "  Claude CLI installed successfully" "OK"
+            return $true
+        } else {
+            # Check alternate location
+            $claudePath = Join-Path $npmGlobalPath "node_modules\.bin\claude.cmd"
+            if (Test-Path $claudePath) {
+                Write-Log "  Claude CLI installed successfully" "OK"
+                return $true
+            }
+            Write-Log "  Claude CLI not found after install" "WARN"
+            return $false
+        }
+    } catch {
+        Write-Log "Failed to install Claude CLI: $($_.Exception.Message)" "ERROR"
+        return $false
+    }
+}
+
+function Set-UserOwnership {
+    param(
+        [string]$Username,
+        [string]$UserHome
+    )
+
+    # Set ownership on specific directories only (avoid recursive symlink loops)
+    $dirsToOwn = @(
+        "$UserHome\.claude",
+        "$UserHome\projects",
+        "$UserHome\AppData\Roaming\nvm",
+        "$UserHome\AppData\Roaming\nodejs",
+        "$UserHome\AppData\Roaming\npm",
+        "$UserHome\.gitconfig",
+        "$UserHome\.npmrc"
+    )
+
+    foreach ($path in $dirsToOwn) {
+        if (Test-Path $path) {
+            # Use /T for directories, skip for files
+            if (Test-Path $path -PathType Container) {
+                icacls $path /setowner $Username /T /C 2>&1 | Out-Null
+                icacls $path /grant "${Username}:(OI)(CI)F" /T /C 2>&1 | Out-Null
+            } else {
+                icacls $path /setowner $Username /C 2>&1 | Out-Null
+                icacls $path /grant "${Username}:F" /C 2>&1 | Out-Null
+            }
+        }
+    }
+}
+
+# ============================================================================
+# SPAWN COMMAND
+# ============================================================================
+
+function Invoke-Spawn {
+    param(
+        [string]$Username,
+        [string]$Template,
+        [string]$Password
+    )
+
+    Test-AdminPrivileges
+
+    if (-not $Username) {
+        Write-Log "Username required. Usage: spawner spawn <username>" "ERROR"
+        exit 1
+    }
+
+    $config = Get-Config
+    $manifest = Get-Manifest
+
+    # Check if user already exists
+    $existingUser = Get-LocalUser -Name $Username -ErrorAction SilentlyContinue
+    if ($existingUser) {
+        Write-Log "User '$Username' already exists. Use 'respawn' to recreate." "ERROR"
+        exit 1
+    }
+
+    # Set defaults
+    if (-not $Template) { $Template = $config.defaults.template }
+    if (-not $Password) { $Password = Get-PasswordForUser $Username $config }
+    $category = Get-CategoryFromUsername $Username
+
+    Write-Log "========================================" "STEP"
+    Write-Log "  SPAWN: $Username" "STEP"
+    Write-Log "  Template: $Template" "STEP"
+    Write-Log "  Category: $category" "STEP"
+    Write-Log "========================================" "STEP"
+
+    # Ensure dependencies are cached
+    if (-not (Ensure-Dependencies $config)) {
+        Write-Log "Failed to ensure dependencies" "ERROR"
+        exit 1
+    }
+
+    $UserHome = "C:\Users\$Username"
+    $rollbackNeeded = $false
+
+    try {
+        # 1. Create Windows user
+        Write-Log "Creating Windows user account..." "STEP"
+        $SecurePassword = ConvertTo-SecureStringDirect $Password
+        New-LocalUser -Name $Username -Password $SecurePassword -Description "Spawner: $category/$Template" -PasswordNeverExpires | Out-Null
+        Add-LocalGroupMember -Group "Users" -Member $Username -ErrorAction SilentlyContinue
+        $rollbackNeeded = $true
+        Write-Log "  User account created" "OK"
+
+        # 2. Create user profile
+        Write-Log "Creating user profile..." "STEP"
+        $Credential = New-Object PSCredential($Username, $SecurePassword)
+
+        # Trigger profile creation by running a process as the user
+        $profileCreated = $false
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            try {
+                $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c echo init" `
+                    -Credential $Credential -PassThru -WindowStyle Hidden -Wait -ErrorAction Stop
+                Start-Sleep -Seconds 2
+                if (Test-Path $UserHome) {
+                    $profileCreated = $true
+                    break
+                }
+            } catch {
+                Start-Sleep -Seconds 1
+            }
+        }
+
+        if (-not $profileCreated) {
+            # Manual profile creation fallback
+            New-Item -ItemType Directory -Path $UserHome -Force | Out-Null
+            $defaultDirs = @("AppData", "AppData\Local", "AppData\Roaming", "Desktop", "Documents", "Downloads")
+            foreach ($dir in $defaultDirs) {
+                New-Item -ItemType Directory -Path "$UserHome\$dir" -Force | Out-Null
+            }
+        }
+        Write-Log "  Profile created: $UserHome" "OK"
+
+        # 3. Create directory structure
+        Write-Log "Creating directory structure..." "STEP"
+        $dirs = @("$UserHome\.claude", "$UserHome\projects", "$UserHome\AppData\Roaming\npm")
+        foreach ($dir in $dirs) {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        }
+        Write-Log "  Directories created" "OK"
+
+        # 4. Install Node.js (portable)
+        if (-not (Install-NodeForUser $Username $UserHome $config)) {
+            throw "Failed to install Node.js"
+        }
+
+        # 5. Install Claude CLI
+        $claudeInstalled = Install-ClaudeCliForUser $Username $UserHome $config
+
+        # 6. Copy template
+        Write-Log "Copying template: $Template..." "STEP"
+        $templatePath = Join-Path $SpawnerRoot $config.templates.$Template.path
+        if (Test-Path $templatePath) {
+            $robocopyArgs = @($templatePath, "$UserHome\.claude", "/MIR", "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS")
+            $result = Start-Process -FilePath "robocopy.exe" -ArgumentList $robocopyArgs -Wait -PassThru -NoNewWindow
+            if ($result.ExitCode -le 7) {
+                Write-Log "  Template copied" "OK"
+            }
+        } else {
+            Write-Log "  Template not found: $templatePath" "WARN"
+        }
+
+        # 7. Configure git
+        Write-Log "Configuring Git..." "STEP"
+        $gitConfig = @"
+[user]
+    name = $Username
+    email = $Username@local.spawner
+[init]
+    defaultBranch = main
+"@
+        $gitConfig | Out-File "$UserHome\.gitconfig" -Encoding UTF8 -Force
+        Write-Log "  Git configured" "OK"
+
+        # 8. Copy API key
+        Write-Log "Setting up API key..." "STEP"
+        $apiKeyFile = Join-Path $SpawnerRoot "_config\api-keys.env"
+        if (Test-Path $apiKeyFile) {
+            $keyLine = Get-Content $apiKeyFile | Where-Object { $_ -match "^ANTHROPIC_API_KEY=" }
+            if ($keyLine) {
+                $keyLine | Out-File "$UserHome\.claude\.env" -Encoding UTF8 -Force
+                Write-Log "  API key configured" "OK"
+            }
+        } else {
+            Write-Log "  No API key file found" "WARN"
+        }
+
+        # 9. Set ownership
+        Write-Log "Setting file ownership..." "STEP"
+        Set-UserOwnership $Username $UserHome
+        Write-Log "  Ownership set" "OK"
+
+        # 10. Save credentials for runas
+        Write-Log "Saving credentials..." "STEP"
+        cmdkey /add:$Username /user:$Username /pass:$Password 2>&1 | Out-Null
+        Write-Log "  Credentials saved" "OK"
+
+        # 11. Update manifest
+        Write-Log "Updating manifest..." "STEP"
+        $userEntry = @{
+            category = $category
+            template = $Template
+            created = (Get-Date -Format "yyyy-MM-dd")
+            home = $UserHome
+            status = "active"
+            nodeInstalled = $true
+            claudeInstalled = $claudeInstalled
+        }
+
+        if ($manifest.users -is [PSCustomObject]) {
+            $manifest.users | Add-Member -NotePropertyName $Username -NotePropertyValue $userEntry -Force
+        } else {
+            $manifest.users = @{ $Username = $userEntry }
+        }
+        Save-Manifest $manifest
+        Write-Log "  Manifest updated" "OK"
+
+        # Success
+        Write-Log "========================================" "OK"
+        Write-Log "  SUCCESS: $Username is ready!" "OK"
+        Write-Log "========================================" "OK"
+        Write-Log "" "INFO"
+        Write-Log "Switch to user:" "INFO"
+        Write-Log "  runas /user:$Username cmd" "INFO"
+        Write-Log "  Then run: claude" "INFO"
+
+    } catch {
+        Write-Log "SPAWN FAILED: $($_.Exception.Message)" "ERROR"
+
+        if ($rollbackNeeded) {
+            Write-Log "Rolling back..." "WARN"
+            Remove-LocalUser -Name $Username -ErrorAction SilentlyContinue
+        }
+        exit 1
+    }
+}
+
+# ============================================================================
+# RESPAWN COMMAND
+# ============================================================================
+
+function Invoke-Respawn {
+    param(
+        [string]$Username,
+        [switch]$CliOnly,
+        [string]$Template
+    )
+
+    Test-AdminPrivileges
+
+    if (-not $Username) {
+        Write-Log "Username required. Usage: spawner respawn <username>" "ERROR"
+        exit 1
+    }
+
+    $config = Get-Config
+    $manifest = Get-Manifest
+    $UserHome = "C:\Users\$Username"
+
+    # Check if user exists
+    $existingUser = Get-LocalUser -Name $Username -ErrorAction SilentlyContinue
+    if (-not $existingUser) {
+        Write-Log "User '$Username' does not exist" "ERROR"
+        exit 1
+    }
+
+    if ($CliOnly) {
+        # Just reset .claude directory
+        Write-Log "========================================" "STEP"
+        Write-Log "  RESPAWN (CLI only): $Username" "STEP"
+        Write-Log "========================================" "STEP"
+
+        # Backup existing .claude if configured
+        if ($config.despawn.backup -and -not $NoBackup) {
+            $backupDir = Join-Path $BackupsPath "$Username-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+            if (Test-Path "$UserHome\.claude") {
+                Write-Log "Backing up .claude..." "STEP"
+                New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+                Copy-Item "$UserHome\.claude" -Destination "$backupDir\.claude" -Recurse -Force
+                Write-Log "  Backed up to $backupDir" "OK"
+            }
+        }
+
+        # Delete .claude
+        Write-Log "Removing .claude directory..." "STEP"
+        if (Test-Path "$UserHome\.claude") {
+            Remove-Item "$UserHome\.claude" -Recurse -Force
+        }
+
+        # Copy fresh template
+        if (-not $Template) {
+            # Get from manifest or default
+            if ($manifest.users.$Username -and $manifest.users.$Username.template) {
+                $Template = $manifest.users.$Username.template
+            } else {
+                $Template = $config.defaults.template
+            }
+        }
+
+        Write-Log "Copying template: $Template..." "STEP"
+        New-Item -ItemType Directory -Path "$UserHome\.claude" -Force | Out-Null
+        $templatePath = Join-Path $SpawnerRoot $config.templates.$Template.path
+        if (Test-Path $templatePath) {
+            $robocopyArgs = @($templatePath, "$UserHome\.claude", "/MIR", "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS")
+            Start-Process -FilePath "robocopy.exe" -ArgumentList $robocopyArgs -Wait -NoNewWindow | Out-Null
+        }
+
+        # Restore API key
+        $apiKeyFile = Join-Path $SpawnerRoot "_config\api-keys.env"
+        if (Test-Path $apiKeyFile) {
+            $keyLine = Get-Content $apiKeyFile | Where-Object { $_ -match "^ANTHROPIC_API_KEY=" }
+            if ($keyLine) {
+                $keyLine | Out-File "$UserHome\.claude\.env" -Encoding UTF8 -Force
+            }
+        }
+
+        # Set ownership
+        Set-UserOwnership $Username "$UserHome\.claude"
+
+        Write-Log "  .claude reset complete" "OK"
+
+    } else {
+        # Full respawn - delete and recreate
+        Write-Log "========================================" "STEP"
+        Write-Log "  RESPAWN (full): $Username" "STEP"
+        Write-Log "========================================" "STEP"
+
+        # Get current settings before despawn
+        $currentTemplate = $Template
+        if (-not $currentTemplate -and $manifest.users.$Username) {
+            $currentTemplate = $manifest.users.$Username.template
+        }
+        if (-not $currentTemplate) { $currentTemplate = $config.defaults.template }
+
+        $currentPassword = Get-PasswordForUser $Username $config
+
+        # Despawn
+        Invoke-Despawn -Username $Username -SkipConfirm
+
+        # Spawn fresh
+        Invoke-Spawn -Username $Username -Template $currentTemplate -Password $currentPassword
+    }
+}
+
+# ============================================================================
+# DESPAWN COMMAND
+# ============================================================================
+
+function Invoke-Despawn {
+    param(
+        [string]$Username,
+        [switch]$SkipConfirm
+    )
+
+    Test-AdminPrivileges
+
+    if (-not $Username) {
+        Write-Log "Username required. Usage: spawner despawn <username>" "ERROR"
+        exit 1
+    }
+
+    $config = Get-Config
+    $manifest = Get-Manifest
+    $UserHome = "C:\Users\$Username"
+
+    # Check if user exists
+    $existingUser = Get-LocalUser -Name $Username -ErrorAction SilentlyContinue
+    if (-not $existingUser) {
+        Write-Log "User '$Username' does not exist" "ERROR"
+        exit 1
+    }
+
+    Write-Log "========================================" "STEP"
+    Write-Log "  DESPAWN: $Username" "STEP"
+    Write-Log "========================================" "STEP"
+
+    # Confirm unless forced or called internally
+    if ($config.despawn.confirm -and -not $Force -and -not $SkipConfirm) {
+        $response = Read-Host "Delete user '$Username' and all data? (yes/no)"
+        if ($response -ne "yes") {
+            Write-Log "Aborted" "WARN"
+            exit 0
+        }
+    }
+
+    # Backup if configured
+    if ($config.despawn.backup -and -not $NoBackup) {
+        $backupDir = Join-Path $BackupsPath "$Username-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+        if (Test-Path $UserHome) {
+            Write-Log "Backing up user data..." "STEP"
+            New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+
+            # Copy important directories
+            $dirsToBackup = @(".claude", "projects", ".gitconfig")
+            foreach ($dir in $dirsToBackup) {
+                $src = Join-Path $UserHome $dir
+                if (Test-Path $src) {
+                    Copy-Item $src -Destination $backupDir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+            Write-Log "  Backed up to $backupDir" "OK"
+        }
+    }
+
+    # Kill any processes running as this user (use taskkill for speed)
+    Write-Log "Terminating user processes..." "STEP"
+    try {
+        # Fast approach: use taskkill with /FI filter
+        $result = & taskkill /F /FI "USERNAME eq $Username" 2>&1
+        # taskkill returns error if no processes found, which is fine
+    } catch {}
+    Start-Sleep -Seconds 1
+    Write-Log "  Processes terminated" "OK"
+
+    # Remove saved credentials
+    Write-Log "Removing saved credentials..." "STEP"
+    cmdkey /delete:$Username 2>&1 | Out-Null
+    Write-Log "  Credentials removed" "OK"
+
+    # Delete Windows user
+    Write-Log "Deleting Windows user..." "STEP"
+    Remove-LocalUser -Name $Username -ErrorAction SilentlyContinue
+    Write-Log "  User deleted" "OK"
+
+    # Delete home directory
+    Write-Log "Deleting home directory..." "STEP"
+    if (Test-Path $UserHome) {
+        # Use cmd /c rd for reliable deletion (handles junctions/symlinks properly)
+        $result = & cmd /c "rd /s /q `"$UserHome`"" 2>&1
+        # If rd fails, try takeown without /R (skip recursive to avoid symlink loops)
+        if (Test-Path $UserHome) {
+            takeown /F $UserHome /D Y 2>&1 | Out-Null
+            # Grant permissions on top-level only, then delete
+            icacls $UserHome /grant Administrators:F /C 2>&1 | Out-Null
+            Remove-Item $UserHome -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Write-Log "  Home directory deleted" "OK"
+
+    # Remove from manifest
+    Write-Log "Updating manifest..." "STEP"
+    if ($manifest.users.$Username) {
+        $manifest.users.PSObject.Properties.Remove($Username)
+        Save-Manifest $manifest
+    }
+    Write-Log "  Manifest updated" "OK"
+
+    Write-Log "========================================" "OK"
+    Write-Log "  DESPAWN complete: $Username" "OK"
+    Write-Log "========================================" "OK"
+}
+
+# ============================================================================
+# COSPAWN COMMAND
+# ============================================================================
+
+function Invoke-Cospawn {
+    param(
+        [string]$Username,
+        [string]$SourceUser,
+        [switch]$FullProfile
+    )
+
+    Test-AdminPrivileges
+
+    if (-not $Username) {
+        Write-Log "Username required. Usage: spawner cospawn <username> --from <source>" "ERROR"
+        exit 1
+    }
+
+    if (-not $SourceUser) {
+        Write-Log "Source user required. Usage: spawner cospawn <username> --from <source>" "ERROR"
+        exit 1
+    }
+
+    $config = Get-Config
+    $SourceHome = "C:\Users\$SourceUser"
+    $UserHome = "C:\Users\$Username"
+
+    # Check source exists
+    if (-not (Test-Path $SourceHome)) {
+        Write-Log "Source user home not found: $SourceHome" "ERROR"
+        exit 1
+    }
+
+    Write-Log "========================================" "STEP"
+    Write-Log "  COSPAWN: $Username from $SourceUser" "STEP"
+    Write-Log "========================================" "STEP"
+
+    # Spawn the new user with vanilla template
+    Invoke-Spawn -Username $Username -Template "vanilla"
+
+    # Now copy from source
+    if ($FullProfile) {
+        Write-Log "Copying full profile from $SourceUser..." "STEP"
+        $dirsToSync = @(".claude", "projects", ".gitconfig", ".npmrc")
+    } else {
+        Write-Log "Copying .claude from $SourceUser..." "STEP"
+        $dirsToSync = @(".claude")
+    }
+
+    foreach ($item in $dirsToSync) {
+        $src = Join-Path $SourceHome $item
+        $dst = Join-Path $UserHome $item
+
+        if (Test-Path $src) {
+            # Remove existing
+            if (Test-Path $dst) {
+                Remove-Item $dst -Recurse -Force -ErrorAction SilentlyContinue
+            }
+
+            # Copy
+            if (Test-Path $src -PathType Container) {
+                $robocopyArgs = @($src, $dst, "/MIR", "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS")
+                Start-Process -FilePath "robocopy.exe" -ArgumentList $robocopyArgs -Wait -NoNewWindow | Out-Null
+            } else {
+                Copy-Item $src -Destination $dst -Force
+            }
+            Write-Log "  Copied: $item" "OK"
+        }
+    }
+
+    # Set ownership
+    Set-UserOwnership $Username $UserHome
+
+    # Update manifest with source info
+    $manifest = Get-Manifest
+    if ($manifest.users.$Username) {
+        $manifest.users.$Username | Add-Member -NotePropertyName "copiedFrom" -NotePropertyValue $SourceUser -Force
+        Save-Manifest $manifest
+    }
+
+    Write-Log "========================================" "OK"
+    Write-Log "  COSPAWN complete: $Username" "OK"
+    Write-Log "========================================" "OK"
+}
+
+# ============================================================================
+# HELP
+# ============================================================================
+
+function Show-Help {
+    Write-Host @"
+
+Spawner v2 - Simplified User Environment Management
+
+USAGE:
+    spawner <command> <username> [options]
+
+COMMANDS:
+    spawn <username>     Create ready-to-use user environment
+    respawn <username>   Recreate user (full) or reset config (--cli)
+    despawn <username>   Delete user and all data
+    cospawn <username>   Copy environment from another user
+
+OPTIONS:
+    --template <name>    Template: vanilla, pai-vanilla, pai-starter, pai-clone
+    --password <pass>    Override default password
+    --from <user>        Source user for cospawn
+    --cli                Respawn: only reset .claude directory
+    --full               Cospawn: copy full profile (not just .claude)
+    --force              Skip confirmation prompts
+    --no-backup          Skip automatic backups
+    --quiet              Suppress output (logs only)
+
+EXAMPLES:
+    spawner spawn Lab4
+    spawner spawn Lab4 --template pai-clone
+    spawner respawn Lab4 --cli
+    spawner despawn Lab4 --force
+    spawner cospawn Lab5 --from Lab4
+
+"@ -ForegroundColor Cyan
+}
+
+# ============================================================================
+# MAIN
+# ============================================================================
+
+switch ($Command) {
+    "spawn" {
+        Invoke-Spawn -Username $Username -Template $Template -Password $Password
+    }
+    "respawn" {
+        Invoke-Respawn -Username $Username -CliOnly:$Cli -Template $Template
+    }
+    "despawn" {
+        Invoke-Despawn -Username $Username
+    }
+    "cospawn" {
+        Invoke-Cospawn -Username $Username -SourceUser $From -FullProfile:$Full
+    }
+    "help" {
+        Show-Help
+    }
+    default {
+        Show-Help
+    }
+}
