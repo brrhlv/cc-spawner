@@ -9,7 +9,7 @@
 #
 # Examples:
 #   .\spawner.ps1 spawn Lab4
-#   .\spawner.ps1 spawn Lab4 --template pai-clone
+#   .\spawner.ps1 spawn Lab4 --template vanilla
 #   .\spawner.ps1 respawn Lab4 --cli
 #   .\spawner.ps1 despawn Lab4 --force
 #   .\spawner.ps1 cospawn Lab5 --from Lab4
@@ -851,7 +851,7 @@ COMMANDS:
     cospawn <username>   Copy environment from another user
 
 OPTIONS:
-    --template <name>    Template: vanilla, pai-vanilla, pai-starter, pai-clone
+    --template <name>    Template name (default: vanilla)
     --password <pass>    Override default password
     --from <user>        Source user for cospawn
     --cli                Respawn: only reset .claude directory
@@ -862,7 +862,7 @@ OPTIONS:
 
 EXAMPLES:
     spawner spawn Lab4
-    spawner spawn Lab4 --template pai-clone
+    spawner spawn Lab4 --template vanilla
     spawner respawn Lab4 --cli
     spawner despawn Lab4 --force
     spawner cospawn Lab5 --from Lab4

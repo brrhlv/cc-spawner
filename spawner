@@ -4,7 +4,7 @@
 #
 # Usage:
 #   ./spawner spawn Lab4
-#   ./spawner spawn Lab4 --template pai-clone
+#   ./spawner spawn Lab4 --template vanilla
 #   ./spawner respawn Lab4 --cli
 #   ./spawner despawn Lab4 --force
 #   ./spawner cospawn Lab5 --from Lab4
