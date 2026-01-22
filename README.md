@@ -6,6 +6,8 @@
 
 Windows user environment management for Claude Code testing and development.
 
+![cc-spawner Architecture](assets/cc-spawner-diagram.svg)
+
 ## Why cc-spawner?
 
 When testing Claude Code configurations, you need **isolated environments** that don't contaminate your main setup. cc-spawner creates dedicated Windows users with:

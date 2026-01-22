@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parallel Genesis - cc-spawner</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&family=Lora:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --anthropic-dark: #141413;
+            --anthropic-light: #faf9f5;
+            --anthropic-mid-gray: #b0aea5;
+            --anthropic-light-gray: #e8e6dc;
+            --anthropic-orange: #d97757;
+            --anthropic-blue: #6a9bcc;
+            --anthropic-green: #788c5d;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: linear-gradient(135deg, var(--anthropic-light) 0%, #f5f3ee 100%);
+            min-height: 100vh;
+            color: var(--anthropic-dark);
+        }
+
+        .container {
+            display: flex;
+            min-height: 100vh;
+            padding: 20px;
+            gap: 20px;
+        }
+
+        .sidebar {
+            width: 320px;
+            flex-shrink: 0;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(20, 20, 19, 0.1);
+            overflow-y: auto;
+        }
+
+        .sidebar h1 {
+            font-family: 'Lora', serif;
+            font-size: 24px;
+            font-weight: 500;
+            color: var(--anthropic-dark);
+            margin-bottom: 8px;
+        }
+
+        .sidebar .subtitle {
+            color: var(--anthropic-mid-gray);
+            font-size: 14px;
+            margin-bottom: 32px;
+            line-height: 1.4;
+        }
+
+        .control-section { margin-bottom: 32px; }
+
+        .control-section h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--anthropic-dark);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .control-section h3::before {
+            content: '•';
+            color: var(--anthropic-orange);
+            font-weight: bold;
+        }
+
+        .seed-input {
+            width: 100%;
+            background: var(--anthropic-light);
+            padding: 12px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            margin-bottom: 12px;
+            border: 1px solid var(--anthropic-light-gray);
+            text-align: center;
+        }
+
+        .seed-input:focus {
+            outline: none;
+            border-color: var(--anthropic-orange);
+            box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.1);
+            background: white;
+        }
+
+        .seed-controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .control-group { margin-bottom: 20px; }
+
+        .control-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--anthropic-dark);
+            margin-bottom: 8px;
+        }
+
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .slider-container input[type="range"] {
+            flex: 1;
+            height: 4px;
+            background: var(--anthropic-light-gray);
+            border-radius: 2px;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        .slider-container input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            background: var(--anthropic-orange);
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .slider-container input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.1);
+            background: #c86641;
+        }
+
+        .value-display {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: var(--anthropic-mid-gray);
+            min-width: 50px;
+            text-align: right;
+        }
+
+        .color-group { margin-bottom: 16px; }
+
+        .color-group label {
+            display: block;
+            font-size: 12px;
+            color: var(--anthropic-mid-gray);
+            margin-bottom: 4px;
+        }
+
+        .color-picker-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .color-picker-container input[type="color"] {
+            width: 32px;
+            height: 32px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            background: none;
+            padding: 0;
+        }
+
+        .color-value {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: var(--anthropic-mid-gray);
+        }
+
+        .button {
+            background: var(--anthropic-orange);
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            width: 100%;
+        }
+
+        .button:hover {
+            background: #c86641;
+            transform: translateY(-1px);
+        }
+
+        .button.secondary { background: var(--anthropic-blue); }
+        .button.secondary:hover { background: #5a8bb8; }
+        .button.tertiary { background: var(--anthropic-green); }
+        .button.tertiary:hover { background: #6b7b52; }
+
+        .button-row { display: flex; gap: 8px; }
+        .button-row .button { flex: 1; }
+
+        .canvas-area {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 0;
+        }
+
+        #canvas-container {
+            width: 100%;
+            max-width: 1000px;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 20px 40px rgba(20, 20, 19, 0.1);
+            background: white;
+        }
+
+        #canvas-container canvas {
+            display: block;
+            width: 100% !important;
+            height: auto !important;
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            color: var(--anthropic-mid-gray);
+            padding: 100px;
+        }
+
+        @media (max-width: 600px) {
+            .container { flex-direction: column; }
+            .sidebar { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <h1>Parallel Genesis</h1>
+            <div class="subtitle">Generative art for cc-spawner — isolated environments spawning in parallel harmony</div>
+
+            <!-- Seed Section -->
+            <div class="control-section">
+                <h3>Seed</h3>
+                <input type="number" id="seed-input" class="seed-input" value="42" onchange="updateSeed()">
+                <div class="seed-controls">
+                    <button class="button secondary" onclick="previousSeed()">← Prev</button>
+                    <button class="button secondary" onclick="nextSeed()">Next →</button>
+                </div>
+                <button class="button tertiary" onclick="randomSeedAndUpdate()">↻ Random</button>
+            </div>
+
+            <!-- Parameters Section -->
+            <div class="control-section">
+                <h3>Parameters</h3>
+
+                <div class="control-group">
+                    <label>Grid Size</label>
+                    <div class="slider-container">
+                        <input type="range" id="gridSize" min="2" max="5" step="1" value="3" oninput="updateParam('gridSize', this.value)">
+                        <span class="value-display" id="gridSize-value">3×3</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>Particles per Cell</label>
+                    <div class="slider-container">
+                        <input type="range" id="particlesPerCell" min="20" max="150" step="10" value="80" oninput="updateParam('particlesPerCell', this.value)">
+                        <span class="value-display" id="particlesPerCell-value">80</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>Flow Speed</label>
+                    <div class="slider-container">
+                        <input type="range" id="flowSpeed" min="0.5" max="3" step="0.1" value="1.5" oninput="updateParam('flowSpeed', this.value)">
+                        <span class="value-display" id="flowSpeed-value">1.5</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>Border Width</label>
+                    <div class="slider-container">
+                        <input type="range" id="borderWidth" min="2" max="12" step="1" value="4" oninput="updateParam('borderWidth', this.value)">
+                        <span class="value-display" id="borderWidth-value">4</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>Noise Scale</label>
+                    <div class="slider-container">
+                        <input type="range" id="noiseScale" min="0.002" max="0.015" step="0.001" value="0.006" oninput="updateParam('noiseScale', this.value)">
+                        <span class="value-display" id="noiseScale-value">0.006</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Colors Section -->
+            <div class="control-section">
+                <h3>Colors</h3>
+
+                <div class="color-group">
+                    <label>Terminal Blue</label>
+                    <div class="color-picker-container">
+                        <input type="color" id="color1" value="#1e3a5f" onchange="updateColor(0, this.value)">
+                        <span class="color-value" id="color1-value">#1e3a5f</span>
+                    </div>
+                </div>
+
+                <div class="color-group">
+                    <label>Process Amber</label>
+                    <div class="color-picker-container">
+                        <input type="color" id="color2" value="#d4a574" onchange="updateColor(1, this.value)">
+                        <span class="color-value" id="color2-value">#d4a574</span>
+                    </div>
+                </div>
+
+                <div class="color-group">
+                    <label>Success Green</label>
+                    <div class="color-picker-container">
+                        <input type="color" id="color3" value="#4a7c59" onchange="updateColor(2, this.value)">
+                        <span class="color-value" id="color3-value">#4a7c59</span>
+                    </div>
+                </div>
+
+                <div class="color-group">
+                    <label>Border Color</label>
+                    <div class="color-picker-container">
+                        <input type="color" id="borderColor" value="#2d3748" onchange="updateBorderColor(this.value)">
+                        <span class="color-value" id="borderColor-value">#2d3748</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Actions Section -->
+            <div class="control-section">
+                <h3>Actions</h3>
+                <div class="button-row">
+                    <button class="button" onclick="resetParameters()">Reset</button>
+                    <button class="button secondary" onclick="downloadImage()">Download</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="canvas-area">
+            <div id="canvas-container">
+                <div class="loading">Spawning parallel environments...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ═══════════════════════════════════════════════════════════════════════
+        // PARALLEL GENESIS - PARAMETERS
+        // ═══════════════════════════════════════════════════════════════════════
+
+        let params = {
+            seed: 42,
+            gridSize: 3,
+            particlesPerCell: 80,
+            flowSpeed: 1.5,
+            borderWidth: 4,
+            noiseScale: 0.006,
+            colors: ['#1e3a5f', '#d4a574', '#4a7c59'],
+            borderColor: '#2d3748'
+        };
+
+        let defaultParams = JSON.parse(JSON.stringify(params));
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // PARALLEL GENESIS - GENERATIVE ALGORITHM
+        // ═══════════════════════════════════════════════════════════════════════
+
+        let territories = [];
+        let canvasSize = 1200;
+
+        function setup() {
+            let canvas = createCanvas(canvasSize, canvasSize);
+            canvas.parent('canvas-container');
+            pixelDensity(1);
+            initializeSystem();
+            document.querySelector('.loading').style.display = 'none';
+        }
+
+        function initializeSystem() {
+            randomSeed(params.seed);
+            noiseSeed(params.seed);
+
+            territories = [];
+
+            let gridSize = params.gridSize;
+            let cellSize = (canvasSize - params.borderWidth * (gridSize + 1)) / gridSize;
+
+            // Create territories (isolated environments)
+            for (let row = 0; row < gridSize; row++) {
+                for (let col = 0; col < gridSize; col++) {
+                    let x = params.borderWidth + col * (cellSize + params.borderWidth);
+                    let y = params.borderWidth + row * (cellSize + params.borderWidth);
+
+                    // Each territory gets a unique noise offset (isolation)
+                    let noiseOffsetX = random(1000);
+                    let noiseOffsetY = random(1000);
+
+                    // Assign color based on position with some randomness
+                    let colorIndex = floor(random(params.colors.length));
+
+                    territories.push(new Territory(x, y, cellSize, noiseOffsetX, noiseOffsetY, colorIndex, row * gridSize + col));
+                }
+            }
+
+            // Start fresh
+            background(hexToRgb(params.borderColor));
+        }
+
+        function draw() {
+            // Draw border/membrane background
+            background(hexToRgb(params.borderColor));
+
+            // Update and draw each territory
+            for (let territory of territories) {
+                territory.update();
+                territory.display();
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // TERRITORY CLASS - ISOLATED ENVIRONMENT
+        // ═══════════════════════════════════════════════════════════════════════
+
+        class Territory {
+            constructor(x, y, size, noiseOffX, noiseOffY, colorIndex, id) {
+                this.x = x;
+                this.y = y;
+                this.size = size;
+                this.noiseOffX = noiseOffX;
+                this.noiseOffY = noiseOffY;
+                this.colorIndex = colorIndex;
+                this.id = id;
+                this.particles = [];
+                this.flowField = [];
+                this.cols = 20;
+                this.rows = 20;
+                this.scl = size / this.cols;
+                this.time = random(1000);
+
+                // Initialize particles within this territory
+                for (let i = 0; i < params.particlesPerCell; i++) {
+                    this.particles.push(new TerritoryParticle(
+                        this.x + random(this.size),
+                        this.y + random(this.size),
+                        this
+                    ));
+                }
+
+                this.generateFlowField();
+            }
+
+            generateFlowField() {
+                this.flowField = [];
+                for (let y = 0; y < this.rows; y++) {
+                    for (let x = 0; x < this.cols; x++) {
+                        let nx = (x + this.noiseOffX) * params.noiseScale * 100;
+                        let ny = (y + this.noiseOffY) * params.noiseScale * 100;
+                        let angle = noise(nx, ny, this.time * 0.001) * TWO_PI * 2;
+                        this.flowField.push(p5.Vector.fromAngle(angle));
+                    }
+                }
+            }
+
+            update() {
+                this.time += 0.5;
+
+                // Periodically regenerate flow field for evolution
+                if (frameCount % 60 === 0) {
+                    this.generateFlowField();
+                }
+
+                for (let particle of this.particles) {
+                    particle.update();
+                }
+            }
+
+            display() {
+                // Draw territory background (slightly lighter than border)
+                let bgColor = hexToRgb(params.borderColor);
+                fill(bgColor.r + 15, bgColor.g + 15, bgColor.b + 15);
+                noStroke();
+                rect(this.x, this.y, this.size, this.size, 4);
+
+                // Draw particles
+                let col = hexToRgb(params.colors[this.colorIndex]);
+                for (let particle of this.particles) {
+                    particle.display(col);
+                }
+
+                // Draw subtle grid lines (terminal aesthetic)
+                stroke(col.r, col.g, col.b, 20);
+                strokeWeight(0.5);
+                let gridStep = this.size / 8;
+                for (let i = 1; i < 8; i++) {
+                    line(this.x + i * gridStep, this.y, this.x + i * gridStep, this.y + this.size);
+                    line(this.x, this.y + i * gridStep, this.x + this.size, this.y + i * gridStep);
+                }
+
+                // Draw territory ID (like window title)
+                fill(col.r, col.g, col.b, 100);
+                noStroke();
+                textSize(10);
+                textFont('Courier New');
+                text(`env_${this.id}`, this.x + 8, this.y + 16);
+            }
+
+            getFlowVector(x, y) {
+                let col = floor((x - this.x) / this.scl);
+                let row = floor((y - this.y) / this.scl);
+                col = constrain(col, 0, this.cols - 1);
+                row = constrain(row, 0, this.rows - 1);
+                return this.flowField[row * this.cols + col];
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // PARTICLE CLASS - PROCESS WITHIN TERRITORY
+        // ═══════════════════════════════════════════════════════════════════════
+
+        class TerritoryParticle {
+            constructor(x, y, territory) {
+                this.pos = createVector(x, y);
+                this.vel = createVector(0, 0);
+                this.acc = createVector(0, 0);
+                this.territory = territory;
+                this.maxSpeed = params.flowSpeed;
+                this.history = [];
+                this.maxHistory = 15;
+                this.alpha = random(100, 200);
+            }
+
+            update() {
+                // Get flow direction from territory's field
+                let flow = this.territory.getFlowVector(this.pos.x, this.pos.y);
+                if (flow) {
+                    this.acc.add(flow);
+                }
+
+                this.vel.add(this.acc);
+                this.vel.limit(this.maxSpeed);
+                this.pos.add(this.vel);
+                this.acc.mult(0);
+
+                // Store history for trails
+                this.history.push(this.pos.copy());
+                if (this.history.length > this.maxHistory) {
+                    this.history.shift();
+                }
+
+                // Wrap within territory bounds (isolated!)
+                if (this.pos.x < this.territory.x) this.pos.x = this.territory.x + this.territory.size;
+                if (this.pos.x > this.territory.x + this.territory.size) this.pos.x = this.territory.x;
+                if (this.pos.y < this.territory.y) this.pos.y = this.territory.y + this.territory.size;
+                if (this.pos.y > this.territory.y + this.territory.size) this.pos.y = this.territory.y;
+            }
+
+            display(col) {
+                // Draw trail
+                noFill();
+                beginShape();
+                for (let i = 0; i < this.history.length; i++) {
+                    let alpha = map(i, 0, this.history.length, 0, this.alpha);
+                    stroke(col.r, col.g, col.b, alpha);
+                    strokeWeight(map(i, 0, this.history.length, 0.5, 2));
+                    vertex(this.history[i].x, this.history[i].y);
+                }
+                endShape();
+
+                // Draw particle head
+                fill(col.r, col.g, col.b, this.alpha);
+                noStroke();
+                ellipse(this.pos.x, this.pos.y, 3, 3);
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // UTILITY FUNCTIONS
+        // ═══════════════════════════════════════════════════════════════════════
+
+        function hexToRgb(hex) {
+            let result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : { r: 0, g: 0, b: 0 };
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // UI CONTROL HANDLERS
+        // ═══════════════════════════════════════════════════════════════════════
+
+        function updateParam(paramName, value) {
+            if (paramName === 'gridSize') {
+                params.gridSize = parseInt(value);
+                document.getElementById('gridSize-value').textContent = value + '×' + value;
+            } else if (paramName === 'particlesPerCell') {
+                params.particlesPerCell = parseInt(value);
+                document.getElementById('particlesPerCell-value').textContent = value;
+            } else if (paramName === 'flowSpeed') {
+                params.flowSpeed = parseFloat(value);
+                document.getElementById('flowSpeed-value').textContent = value;
+            } else if (paramName === 'borderWidth') {
+                params.borderWidth = parseInt(value);
+                document.getElementById('borderWidth-value').textContent = value;
+            } else if (paramName === 'noiseScale') {
+                params.noiseScale = parseFloat(value);
+                document.getElementById('noiseScale-value').textContent = value;
+            }
+            initializeSystem();
+        }
+
+        function updateColor(index, value) {
+            params.colors[index] = value;
+            document.getElementById('color' + (index + 1) + '-value').textContent = value;
+            initializeSystem();
+        }
+
+        function updateBorderColor(value) {
+            params.borderColor = value;
+            document.getElementById('borderColor-value').textContent = value;
+            initializeSystem();
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // SEED CONTROL FUNCTIONS
+        // ═══════════════════════════════════════════════════════════════════════
+
+        function updateSeedDisplay() {
+            document.getElementById('seed-input').value = params.seed;
+        }
+
+        function updateSeed() {
+            let input = document.getElementById('seed-input');
+            let newSeed = parseInt(input.value);
+            if (newSeed && newSeed > 0) {
+                params.seed = newSeed;
+                initializeSystem();
+            } else {
+                updateSeedDisplay();
+            }
+        }
+
+        function previousSeed() {
+            params.seed = Math.max(1, params.seed - 1);
+            updateSeedDisplay();
+            initializeSystem();
+        }
+
+        function nextSeed() {
+            params.seed = params.seed + 1;
+            updateSeedDisplay();
+            initializeSystem();
+        }
+
+        function randomSeedAndUpdate() {
+            params.seed = Math.floor(Math.random() * 999999) + 1;
+            updateSeedDisplay();
+            initializeSystem();
+        }
+
+        function resetParameters() {
+            params = JSON.parse(JSON.stringify(defaultParams));
+
+            document.getElementById('gridSize').value = params.gridSize;
+            document.getElementById('gridSize-value').textContent = params.gridSize + '×' + params.gridSize;
+            document.getElementById('particlesPerCell').value = params.particlesPerCell;
+            document.getElementById('particlesPerCell-value').textContent = params.particlesPerCell;
+            document.getElementById('flowSpeed').value = params.flowSpeed;
+            document.getElementById('flowSpeed-value').textContent = params.flowSpeed;
+            document.getElementById('borderWidth').value = params.borderWidth;
+            document.getElementById('borderWidth-value').textContent = params.borderWidth;
+            document.getElementById('noiseScale').value = params.noiseScale;
+            document.getElementById('noiseScale-value').textContent = params.noiseScale;
+
+            document.getElementById('color1').value = params.colors[0];
+            document.getElementById('color1-value').textContent = params.colors[0];
+            document.getElementById('color2').value = params.colors[1];
+            document.getElementById('color2-value').textContent = params.colors[1];
+            document.getElementById('color3').value = params.colors[2];
+            document.getElementById('color3-value').textContent = params.colors[2];
+            document.getElementById('borderColor').value = params.borderColor;
+            document.getElementById('borderColor-value').textContent = params.borderColor;
+
+            updateSeedDisplay();
+            initializeSystem();
+        }
+
+        function downloadImage() {
+            saveCanvas('parallel-genesis-' + params.seed, 'png');
+        }
+
+        window.addEventListener('load', function() {
+            updateSeedDisplay();
+        });
+    </script>
+</body>
+</html>
