@@ -6,23 +6,29 @@
 #   respawn <username>            Recreate user fresh (or --cli for config only)
 #   despawn <username>            Delete user
 #   cospawn <username> --from <source>  Copy from another user
+#   validate [template]           Validate templates (all or specific)
 #
 # Examples:
 #   .\spawner.ps1 spawn Lab4
-#   .\spawner.ps1 spawn Lab4 --template vanilla
+#   .\spawner.ps1 spawn Lab4 --template pai-clone
 #   .\spawner.ps1 respawn Lab4 --cli
 #   .\spawner.ps1 despawn Lab4 --force
 #   .\spawner.ps1 cospawn Lab5 --from Lab4
+#   .\spawner.ps1 validate                    # Validate all templates
+#   .\spawner.ps1 validate pai-snapshot       # Validate specific template
 
 param(
     [Parameter(Position=0)]
-    [ValidateSet("spawn", "respawn", "despawn", "cospawn", "help")]
+    [ValidateSet("spawn", "respawn", "despawn", "cospawn", "validate", "help")]
     [string]$Command = "help",
 
     [Parameter(Position=1)]
     [string]$Username,
 
+    [Alias("Base")]
     [string]$Template,
+    [string]$Identity,
+    [string]$Projects,
     [string]$Password,
     [string]$From,
     [switch]$Cli,
@@ -36,10 +42,12 @@ param(
 $ErrorActionPreference = "Stop"
 $SpawnerRoot = $PSScriptRoot
 $ConfigPath = Join-Path $SpawnerRoot "config.json"
+$PasswordsPath = Join-Path $SpawnerRoot ".passwords.json"
 $ManifestPath = Join-Path $SpawnerRoot "manifest.json"
 $DepsPath = Join-Path $SpawnerRoot "dependencies"
 $LogsPath = Join-Path $SpawnerRoot "logs"
 $BackupsPath = Join-Path $SpawnerRoot "backups"
+$IdentitiesPath = Join-Path $SpawnerRoot "identities"
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -93,6 +101,38 @@ function Get-Config {
     exit 1
 }
 
+function Get-Passwords {
+    if (Test-Path $PasswordsPath) {
+        return Get-Content $PasswordsPath -Raw | ConvertFrom-Json
+    }
+    Write-Log "Passwords file not found: $PasswordsPath" "WARN"
+    Write-Log "Create .passwords.json with category passwords" "WARN"
+    # Return default structure
+    return @{
+        defaults = @{ password = "Spawn12345" }
+        categories = @{}
+    } | ConvertTo-Json | ConvertFrom-Json
+}
+
+function Test-UsernameValid {
+    param([string]$Username)
+    # Username must start with letter, contain only alphanumeric, underscore, hyphen
+    # Max 20 characters
+    if ($Username -match "^[a-zA-Z][a-zA-Z0-9_-]{0,19}$") {
+        return $true
+    }
+    return $false
+}
+
+function Test-ApiKeyValid {
+    param([string]$ApiKey)
+    # Anthropic API keys start with sk-ant-api0X-
+    if ($ApiKey -match "^sk-ant-api0[0-9]-[A-Za-z0-9_-]+$") {
+        return $true
+    }
+    return $false
+}
+
 function Get-Manifest {
     if (Test-Path $ManifestPath) {
         return Get-Content $ManifestPath -Raw | ConvertFrom-Json
@@ -122,12 +162,13 @@ function Get-CategoryFromUsername {
 }
 
 function Get-PasswordForUser {
-    param([string]$Username, $Config)
+    param([string]$Username)
+    $passwords = Get-Passwords
     $category = Get-CategoryFromUsername $Username
-    if ($Config.categories.$category -and $Config.categories.$category.password) {
-        return $Config.categories.$category.password
+    if ($passwords.categories.$category) {
+        return $passwords.categories.$category
     }
-    return $Config.defaults.password
+    return $passwords.defaults.password
 }
 
 # ============================================================================
@@ -349,6 +390,8 @@ function Invoke-Spawn {
     param(
         [string]$Username,
         [string]$Template,
+        [string]$Identity,
+        [string]$Projects,
         [string]$Password
     )
 
@@ -356,6 +399,12 @@ function Invoke-Spawn {
 
     if (-not $Username) {
         Write-Log "Username required. Usage: spawner spawn <username>" "ERROR"
+        exit 1
+    }
+
+    # Validate username format
+    if (-not (Test-UsernameValid $Username)) {
+        Write-Log "Invalid username format. Must start with letter, alphanumeric/underscore/hyphen only, max 20 chars." "ERROR"
         exit 1
     }
 
@@ -371,12 +420,14 @@ function Invoke-Spawn {
 
     # Set defaults
     if (-not $Template) { $Template = $config.defaults.template }
-    if (-not $Password) { $Password = Get-PasswordForUser $Username $config }
+    if (-not $Password) { $Password = Get-PasswordForUser $Username }
     $category = Get-CategoryFromUsername $Username
 
     Write-Log "========================================" "STEP"
     Write-Log "  SPAWN: $Username" "STEP"
-    Write-Log "  Template: $Template" "STEP"
+    Write-Log "  Base: $Template" "STEP"
+    if ($Identity) { Write-Log "  Identity: $Identity" "STEP" }
+    if ($Projects) { Write-Log "  Projects: $Projects" "STEP" }
     Write-Log "  Category: $category" "STEP"
     Write-Log "========================================" "STEP"
 
@@ -444,9 +495,19 @@ function Invoke-Spawn {
         # 5. Install Claude CLI
         $claudeInstalled = Install-ClaudeCliForUser $Username $UserHome $config
 
-        # 6. Copy template
-        Write-Log "Copying template: $Template..." "STEP"
+        # 6. Validate and copy template
+        Write-Log "Validating template: $Template..." "STEP"
         $templatePath = Join-Path $SpawnerRoot $config.templates.$Template.path
+        $templateRoot = Split-Path $templatePath -Parent
+
+        # Run template validation (auto-fix issues)
+        $validateScript = Join-Path $SpawnerRoot "lib\Validate-Template.ps1"
+        if (Test-Path $validateScript) {
+            & $validateScript -TemplatePath $templateRoot -Fix -ShowDetails:$false
+            Write-Log "  Template validated" "OK"
+        }
+
+        Write-Log "Copying template: $Template..." "STEP"
         if (Test-Path $templatePath) {
             $robocopyArgs = @($templatePath, "$UserHome\.claude", "/MIR", "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS")
             $result = Start-Process -FilePath "robocopy.exe" -ArgumentList $robocopyArgs -Wait -PassThru -NoNewWindow
@@ -455,6 +516,68 @@ function Invoke-Spawn {
             }
         } else {
             Write-Log "  Template not found: $templatePath" "WARN"
+        }
+
+        # 6.5. Merge identity (if specified)
+        if ($Identity) {
+            Write-Log "Merging identity: $Identity..." "STEP"
+            $identityPath = Join-Path $IdentitiesPath $Identity
+
+            if (Test-Path $identityPath) {
+                $mergeScript = Join-Path $SpawnerRoot "lib\Merge-Identity.ps1"
+                if (Test-Path $mergeScript) {
+                    $result = & $mergeScript -UserPath "$UserHome\.claude" -IdentityPath $identityPath -ShowDetails
+                    if ($result.Merged.Count -gt 0) {
+                        Write-Log "  Merged: $($result.Merged -join ', ')" "OK"
+                    }
+                    if ($result.Warnings.Count -gt 0) {
+                        foreach ($warn in $result.Warnings) {
+                            Write-Log "  $warn" "WARN"
+                        }
+                    }
+                } else {
+                    Write-Log "  Merge script not found" "WARN"
+                }
+            } else {
+                Write-Log "  Identity not found: $identityPath" "WARN"
+                Write-Log "  Available: $((Get-ChildItem $IdentitiesPath -Directory).Name -join ', ')" "INFO"
+            }
+        }
+
+        # 6.6. Copy projects (if specified)
+        if ($Projects) {
+            Write-Log "Copying projects: $Projects..." "STEP"
+            $projectsList = $Projects -split ","
+
+            foreach ($projName in $projectsList) {
+                $projName = $projName.Trim()
+                $projSource = $config.projects.$projName
+
+                if ($projSource) {
+                    if (Test-Path $projSource) {
+                        $projDest = Join-Path "$UserHome\projects" $projName
+
+                        Write-Log "  Copying $projName..." "INFO"
+                        $robocopyArgs = @($projSource, $projDest, "/MIR", "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS", "/XD", ".git", "node_modules", ".next", "dist", "build")
+                        $result = Start-Process -FilePath "robocopy.exe" -ArgumentList $robocopyArgs -Wait -PassThru -NoNewWindow
+
+                        if ($result.ExitCode -le 7) {
+                            # Initialize fresh git repo
+                            Push-Location $projDest
+                            git init -q 2>&1 | Out-Null
+                            Pop-Location
+                            Write-Log "  Copied: $projName (git initialized)" "OK"
+                        } else {
+                            Write-Log "  Failed to copy: $projName" "WARN"
+                        }
+                    } else {
+                        Write-Log "  Project source not found: $projSource" "WARN"
+                    }
+                } else {
+                    Write-Log "  Project not in registry: $projName" "WARN"
+                    Write-Log "  Available: $($config.projects.PSObject.Properties.Name -join ', ')" "INFO"
+                }
+            }
         }
 
         # 7. Configure git
@@ -475,17 +598,58 @@ function Invoke-Spawn {
         if (Test-Path $apiKeyFile) {
             $keyLine = Get-Content $apiKeyFile | Where-Object { $_ -match "^ANTHROPIC_API_KEY=" }
             if ($keyLine) {
-                $keyLine | Out-File "$UserHome\.claude\.env" -Encoding UTF8 -Force
-                Write-Log "  API key configured" "OK"
+                # Validate API key format
+                $apiKey = ($keyLine -split "=", 2)[1].Trim()
+                if (Test-ApiKeyValid $apiKey) {
+                    $keyLine | Out-File "$UserHome\.claude\.env" -Encoding UTF8 -Force
+                    Write-Log "  API key configured (validated)" "OK"
+                } else {
+                    Write-Log "  API key format invalid (expected sk-ant-api0X-...)" "WARN"
+                    $keyLine | Out-File "$UserHome\.claude\.env" -Encoding UTF8 -Force
+                    Write-Log "  API key copied anyway (may not work)" "WARN"
+                }
             }
         } else {
-            Write-Log "  No API key file found" "WARN"
+            Write-Log "  No API key file found (create _config/api-keys.env)" "WARN"
         }
 
         # 9. Set ownership
         Write-Log "Setting file ownership..." "STEP"
         Set-UserOwnership $Username $UserHome
         Write-Log "  Ownership set" "OK"
+
+        # 9.5. Set user environment variables (isolate from global config)
+        Write-Log "Setting environment variables..." "STEP"
+        try {
+            # Get user SID
+            $userSid = (Get-LocalUser -Name $Username | Select-Object -ExpandProperty SID).Value
+
+            # Load user registry hive if not loaded
+            $hivePath = "$UserHome\NTUSER.DAT"
+            $hiveLoaded = $false
+            if (Test-Path $hivePath) {
+                reg load "HKU\$userSid" $hivePath 2>&1 | Out-Null
+                $hiveLoaded = $true
+            }
+
+            # Set CLAUDE_CONFIG_DIR to user's own .claude directory
+            $envPath = "Registry::HKEY_USERS\$userSid\Environment"
+            if (-not (Test-Path $envPath)) {
+                New-Item -Path $envPath -Force | Out-Null
+            }
+            Set-ItemProperty -Path $envPath -Name "CLAUDE_CONFIG_DIR" -Value "$UserHome\.claude" -Type String
+
+            # Unload hive if we loaded it
+            if ($hiveLoaded) {
+                [gc]::Collect()
+                Start-Sleep -Milliseconds 500
+                reg unload "HKU\$userSid" 2>&1 | Out-Null
+            }
+
+            Write-Log "  CLAUDE_CONFIG_DIR set to $UserHome\.claude" "OK"
+        } catch {
+            Write-Log "  Failed to set env vars: $($_.Exception.Message)" "WARN"
+        }
 
         # 10. Save credentials for runas
         Write-Log "Saving credentials..." "STEP"
@@ -497,6 +661,8 @@ function Invoke-Spawn {
         $userEntry = @{
             category = $category
             template = $Template
+            identity = if ($Identity) { $Identity } else { $null }
+            projects = if ($Projects) { $Projects } else { $null }
             created = (Get-Date -Format "yyyy-MM-dd")
             home = $UserHome
             status = "active"
@@ -511,6 +677,14 @@ function Invoke-Spawn {
         }
         Save-Manifest $manifest
         Write-Log "  Manifest updated" "OK"
+
+        # 12. Generate spawn README
+        Write-Log "Generating spawn README..." "STEP"
+        $readmeScript = Join-Path $SpawnerRoot "lib\Generate-SpawnReadme.ps1"
+        if (Test-Path $readmeScript) {
+            $readmePath = & $readmeScript -UserPath "$UserHome\.claude" -Username $Username -Template $Template -Identity $Identity -Projects $Projects -SpawnerRoot $SpawnerRoot
+            Write-Log "  Created: SPAWN-README.md" "OK"
+        }
 
         # Success
         Write-Log "========================================" "OK"
@@ -594,9 +768,17 @@ function Invoke-Respawn {
             }
         }
 
+        # Validate template before copying
+        Write-Log "Validating template: $Template..." "STEP"
+        $templatePath = Join-Path $SpawnerRoot $config.templates.$Template.path
+        $templateRoot = Split-Path $templatePath -Parent
+        $validateScript = Join-Path $SpawnerRoot "lib\Validate-Template.ps1"
+        if (Test-Path $validateScript) {
+            & $validateScript -TemplatePath $templateRoot -Fix -ShowDetails:$false
+        }
+
         Write-Log "Copying template: $Template..." "STEP"
         New-Item -ItemType Directory -Path "$UserHome\.claude" -Force | Out-Null
-        $templatePath = Join-Path $SpawnerRoot $config.templates.$Template.path
         if (Test-Path $templatePath) {
             $robocopyArgs = @($templatePath, "$UserHome\.claude", "/MIR", "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS")
             Start-Process -FilePath "robocopy.exe" -ArgumentList $robocopyArgs -Wait -NoNewWindow | Out-Null
@@ -629,7 +811,7 @@ function Invoke-Respawn {
         }
         if (-not $currentTemplate) { $currentTemplate = $config.defaults.template }
 
-        $currentPassword = Get-PasswordForUser $Username $config
+        $currentPassword = Get-PasswordForUser $Username
 
         # Despawn
         Invoke-Despawn -Username $Username -SkipConfirm
@@ -839,7 +1021,7 @@ function Invoke-Cospawn {
 function Show-Help {
     Write-Host @"
 
-Spawner v2 - Simplified User Environment Management
+Spawner v2 - Universal Identity System
 
 USAGE:
     spawner <command> <username> [options]
@@ -849,9 +1031,23 @@ COMMANDS:
     respawn <username>   Recreate user (full) or reset config (--cli)
     despawn <username>   Delete user and all data
     cospawn <username>   Copy environment from another user
+    validate [template]  Validate templates
+
+BASE TEMPLATES:
+    cc-vanilla           Stock Claude Code (no PAI)
+    pai-vanilla          Minimal PAI skeleton
+    pai-mod              PAI with hooks framework
+
+IDENTITIES (universal - work with any base):
+    developer            Code quality, TDD, API design
+    researcher           Search and summarize
+    learner              Education and tutoring
+    auditor              Security review (read-only)
 
 OPTIONS:
-    --template <name>    Template name (default: vanilla)
+    --base <name>        Base template (alias: --template)
+    --identity <name>    Apply identity (skills, agents, hooks)
+    --projects <list>    Copy projects (comma-separated)
     --password <pass>    Override default password
     --from <user>        Source user for cospawn
     --cli                Respawn: only reset .claude directory
@@ -861,13 +1057,98 @@ OPTIONS:
     --quiet              Suppress output (logs only)
 
 EXAMPLES:
-    spawner spawn Lab4
-    spawner spawn Lab4 --template vanilla
+    spawner spawn Lab1 --base cc-vanilla
+    spawner spawn Lab2 --base pai-mod --identity developer
+    spawner spawn Lab3 --base pai-mod --projects myproject
     spawner respawn Lab4 --cli
     spawner despawn Lab4 --force
     spawner cospawn Lab5 --from Lab4
+    spawner validate pai-mod --force
 
 "@ -ForegroundColor Cyan
+}
+
+# ============================================================================
+# VALIDATE TEMPLATES
+# ============================================================================
+
+function Invoke-ValidateTemplates {
+    param(
+        [string]$TemplateName,
+        [switch]$AutoFix
+    )
+
+    $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+    $validateScript = Join-Path $SpawnerRoot "lib\Validate-Template.ps1"
+
+    if (-not (Test-Path $validateScript)) {
+        Write-Log "Validation script not found: $validateScript" "ERROR"
+        return
+    }
+
+    Write-Host ""
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "  TEMPLATE VALIDATION" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host ""
+
+    $templates = @()
+    if ($TemplateName) {
+        if ($config.templates.$TemplateName) {
+            $templates += @{ Name = $TemplateName; Config = $config.templates.$TemplateName }
+        } else {
+            Write-Host "Template not found: $TemplateName" -ForegroundColor Red
+            Write-Host "Available templates: $($config.templates.PSObject.Properties.Name -join ', ')" -ForegroundColor Yellow
+            return
+        }
+    } else {
+        foreach ($t in $config.templates.PSObject.Properties) {
+            $templates += @{ Name = $t.Name; Config = $t.Value }
+        }
+    }
+
+    $results = @()
+    foreach ($t in $templates) {
+        $templatePath = Join-Path $SpawnerRoot $t.Config.path
+        $templateRoot = Split-Path $templatePath -Parent
+
+        Write-Host "Validating: $($t.Name)" -ForegroundColor White
+        Write-Host "  Path: $templateRoot" -ForegroundColor Gray
+
+        if ($AutoFix) {
+            & $validateScript -TemplatePath $templateRoot -Fix -ShowDetails
+        } else {
+            & $validateScript -TemplatePath $templateRoot -ShowDetails
+        }
+
+        $results += @{
+            Name = $t.Name
+            ExitCode = $LASTEXITCODE
+        }
+        Write-Host ""
+    }
+
+    # Summary
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "  SUMMARY" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+
+    $passed = ($results | Where-Object { $_.ExitCode -eq 0 }).Count
+    $failed = ($results | Where-Object { $_.ExitCode -ne 0 }).Count
+
+    foreach ($r in $results) {
+        $status = if ($r.ExitCode -eq 0) { "[OK]" } else { "[FAIL]" }
+        $color = if ($r.ExitCode -eq 0) { "Green" } else { "Red" }
+        Write-Host "  $status $($r.Name)" -ForegroundColor $color
+    }
+
+    Write-Host ""
+    Write-Host "Passed: $passed / $($results.Count)" -ForegroundColor $(if ($failed -eq 0) { "Green" } else { "Yellow" })
+
+    if ($failed -gt 0 -and -not $AutoFix) {
+        Write-Host ""
+        Write-Host "Run with --force to auto-fix issues" -ForegroundColor Yellow
+    }
 }
 
 # ============================================================================
@@ -876,7 +1157,7 @@ EXAMPLES:
 
 switch ($Command) {
     "spawn" {
-        Invoke-Spawn -Username $Username -Template $Template -Password $Password
+        Invoke-Spawn -Username $Username -Template $Template -Identity $Identity -Projects $Projects -Password $Password
     }
     "respawn" {
         Invoke-Respawn -Username $Username -CliOnly:$Cli -Template $Template
@@ -886,6 +1167,9 @@ switch ($Command) {
     }
     "cospawn" {
         Invoke-Cospawn -Username $Username -SourceUser $From -FullProfile:$Full
+    }
+    "validate" {
+        Invoke-ValidateTemplates -TemplateName $Username -AutoFix:$Force
     }
     "help" {
         Show-Help

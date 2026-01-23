@@ -1,9 +1,9 @@
 {
-  "version": "2.0",
-  "description": "cc-spawner - Windows user environment management for Claude Code testing",
+  "version": "2.4",
+  "description": "Spawner v2 - User environment management with universal identity system",
+  "passwordFile": ".passwords.json",
   "defaults": {
-    "template": "vanilla",
-    "password": "Spawn12345",
+    "template": "cc-vanilla",
     "nodeVersion": "22"
   },
   "despawn": {
@@ -14,22 +14,64 @@
     "nvmVersion": "1.2.2",
     "nodeVersion": "22.12.0"
   },
+  "validation": {
+    "enabled": true,
+    "autoFix": true,
+    "requiredSchema": "https://json.schemastore.org/claude-code-settings.json",
+    "usernamePattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,19}$",
+    "apiKeyPattern": "^sk-ant-api0[0-9]-[A-Za-z0-9_-]+$",
+    "forbiddenPaths": [
+      "_OWNER_HOME_PATH_"
+    ],
+    "cleanDirectories": [
+      "cache", "debug", "logs", "paste-cache", "shell-snapshots",
+      "session-env", "statsig", "state", "telemetry", "temp",
+      "todos", "file-history", "history", "projects", "plugins", "config"
+    ],
+    "cleanFiles": [
+      "history.jsonl", "agent-sessions.json", "span-sessions.json",
+      "langfuse-span-cache.json", "stats-cache.json", "tool-timing-cache.json",
+      "settings.local.json", ".claude.json", ".credentials.json"
+    ]
+  },
   "templates": {
-    "vanilla": {
+    "cc-vanilla": {
       "description": "Stock Claude Code - no PAI, no hooks, no skills",
-      "path": "templates/vanilla/.claude"
+      "path": "templates/cc-vanilla/.claude",
+      "complexity": "minimal"
+    },
+    "pai-vanilla": {
+      "description": "Minimal PAI skeleton - basic structure with sample skill",
+      "path": "templates/pai-vanilla/.claude",
+      "complexity": "basic"
+    },
+    "pai-mod": {
+      "description": "PAI with hooks framework - startup hooks enabled",
+      "path": "templates/pai-mod/.claude",
+      "complexity": "standard"
     }
+  },
+  "projects": {
+    "_example_spawner": "C:\\Users\\YOURUSERNAME\\Spawner",
+    "_example_project": "C:\\Users\\YOURUSERNAME\\projects\\my-project"
   },
   "categories": {
     "lab": {
       "description": "Testing environments - reset often, experimental",
-      "password": "Lab12345",
-      "defaultTemplate": "vanilla"
+      "defaultTemplate": "cc-vanilla"
     },
     "dev": {
-      "description": "Automation environments - vanilla Claude for scripts/agents",
-      "password": "Dev12345",
-      "defaultTemplate": "vanilla"
+      "description": "Development environments - PAI framework for building",
+      "defaultTemplate": "pai-mod"
+    },
+    "work": {
+      "description": "Work environments - PAI with hooks for production work",
+      "defaultTemplate": "pai-mod"
     }
+  },
+  "identities": {
+    "_comment": "Universal identities - work with any base template",
+    "available": ["developer", "researcher", "learner", "auditor"],
+    "path": "identities"
   }
 }

@@ -1,32 +1,16 @@
-# Secrets and API keys
-_config/api-keys.env
-*.env
-!*.env.example
+# Secrets
+_config/
+.env
+.passwords.json
 
-# Runtime directories
+# Generated/cached
 dependencies/
 backups/
 logs/
 
-# User tracking (contains passwords)
-manifest.json
-
-# OS files
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# Editor files
-*.swp
-*.swo
-*~
-.vscode/
-.idea/
-
-# Temporary files
-*.tmp
-*.temp
-*.log
-
-# Old/legacy files
+# Old versions (archive separately if needed)
 _old/
+
+# Runtime
+*.log
+manifest.json

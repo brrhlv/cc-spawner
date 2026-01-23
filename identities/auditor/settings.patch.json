@@ -1,0 +1,32 @@
+{
+  "_comment": "Read-only permissions for auditor identity",
+  "permissions": {
+    "allow": [
+      "Read(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "Bash(grep *)",
+      "Bash(find *)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git show *)",
+      "Bash(git status)",
+      "Bash(npm audit)",
+      "Bash(npm outdated)",
+      "Bash(npm list *)"
+    ],
+    "deny": [
+      "Edit(*)",
+      "Write(*)",
+      "Bash(rm *)",
+      "Bash(mv *)",
+      "Bash(cp *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(npm install *)"
+    ]
+  }
+}

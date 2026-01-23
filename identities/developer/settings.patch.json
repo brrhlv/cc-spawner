@@ -1,0 +1,10 @@
+{
+  "_comment": "Settings to merge into user's settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(npm test:*)",
+      "Bash(npm run lint:*)",
+      "Bash(git *)"
+    ]
+  }
+}

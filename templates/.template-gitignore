@@ -1,0 +1,56 @@
+# Template .gitignore - Copy to each template's .claude/ directory
+# Prevents session-specific and cache files from being included in templates
+
+# Session data
+history.jsonl
+*.jsonl
+agent-sessions.json
+span-sessions.json
+langfuse-span-cache.json
+stats-cache.json
+tool-timing-cache.json
+
+# Cache directories
+cache/
+debug/
+logs/
+paste-cache/
+shell-snapshots/
+session-env/
+statsig/
+state/
+telemetry/
+temp/
+todos/
+file-history/
+history/
+
+# Projects (user-specific session data)
+projects/
+
+# Plugin cache (users install their own)
+plugins/
+
+# Config with secrets
+config/
+.env
+.env.local
+
+# Reports (generated data)
+bridge/reports/
+
+# Temp files
+tmpclaude-*
+*.tmp
+nul
+
+# Local settings overrides
+settings.local.json
+settings.local.json.backup*
+.claude.json
+.claude.json.backup
+.credentials.json
+
+# OS files
+.DS_Store
+Thumbs.db
