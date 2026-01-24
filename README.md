@@ -27,8 +27,8 @@ Create separate Windows users with their own Claude Code configurations, skills,
 # Create a vanilla Claude Code user
 .\spawner.ps1 spawn Lab1
 
-# Create with PAI framework + developer identity
-.\spawner.ps1 spawn Lab2 --base pai-mod --identity developer
+# Create with Python hooks + developer identity
+.\spawner.ps1 spawn Lab2 --template cc-python --identity developer
 
 # Backup your admin config
 .\spawner.ps1 backup
@@ -50,7 +50,7 @@ Create separate Windows users with their own Claude Code configurations, skills,
 | `respawn` | Reset user (full or --cli) | `respawn Lab1 --cli` |
 | `despawn` | Delete user and data | `despawn Lab1 --force` |
 | `cospawn` | Copy from another user | `cospawn Lab2 --from Lab1` |
-| `validate` | Validate templates | `validate pai-mod --force` |
+| `validate` | Validate templates | `validate cc-python --fix` |
 
 ### Admin Management (v3)
 
@@ -58,7 +58,7 @@ Create separate Windows users with their own Claude Code configurations, skills,
 |---------|---------|---------|
 | `backup` | Backup admin's .claude | `backup --output my-backup` |
 | `restore` | Restore from backup | `restore backups/admin/2025-01-23` |
-| `upgrade` | Upgrade from template/git | `upgrade --from pai-mod` |
+| `upgrade` | Upgrade from template/git | `upgrade --from cc-python` |
 
 ### User Snapshots (v3)
 
@@ -73,8 +73,8 @@ Create separate Windows users with their own Claude Code configurations, skills,
 | Command | Purpose | Example |
 |---------|---------|---------|
 | `promote` | Save user as template | `promote Lab1 --as my-template` |
-| `sync` | Push template to users | `sync pai-mod --to Lab1,Lab2` |
-| `diff` | Compare two configs | `diff Lab1 pai-mod --detailed` |
+| `sync` | Push template to users | `sync cc-python --to Lab1,Lab2` |
+| `diff` | Compare two configs | `diff Lab1 cc-python --detailed` |
 
 ### Git Integration (v3)
 
@@ -101,7 +101,7 @@ Create separate Windows users with their own Claude Code configurations, skills,
 
 ```powershell
 # 1. Test and refine config in a Lab user
-.\spawner.ps1 spawn Lab1 --base pai-mod --identity developer
+.\spawner.ps1 spawn Lab1 --template cc-python --identity developer
 # ... customize, test, iterate ...
 
 # 2. Promote to template
@@ -124,14 +124,12 @@ Create separate Windows users with their own Claude Code configurations, skills,
 |----------|-------------|--------|
 | `cc-vanilla` | Stock Claude Code - minimal, no hooks (default) | No |
 | `cc-python` | Claude Code with Python hooks (Anthropic patterns) | Yes |
-| `pai-vanilla` | Full PAI skeleton - TypeScript hooks | Node.js |
 
 ### Legacy Templates (npm-based, deprecated)
 
 | Template | Description |
 |----------|-------------|
 | `cc-vanilla-legacy` | Stock Claude Code (npm installation) |
-| `pai-mod-legacy` | PAI with JS hooks (npm installation) |
 
 ### Template Details
 
@@ -161,8 +159,8 @@ Identities are **universal** - they work with any base template. An identity add
 # Stock Claude + developer skills
 .\spawner.ps1 spawn Lab1 --base cc-vanilla --identity developer
 
-# PAI framework + researcher tools
-.\spawner.ps1 spawn Lab2 --base pai-mod --identity researcher
+# Python hooks + researcher tools
+.\spawner.ps1 spawn Lab2 --template cc-python --identity researcher
 ```
 
 ## Installation
@@ -246,8 +244,7 @@ Spawner/
 │   └── auditor/
 ├── templates/           # Base templates
 │   ├── cc-vanilla/      # Default - minimal
-│   ├── cc-python/       # Python hooks
-│   └── pai-vanilla/     # Full PAI (needs Node)
+│   └── cc-python/       # Python hooks
 ├── lib/                 # Helper scripts
 ├── backups/             # Auto-backups
 ├── exports/             # Sanitized exports
@@ -358,4 +355,3 @@ MIT
 ## Credits
 
 - [Claude Code](https://github.com/anthropics/claude-code) by Anthropic
-- [PAI Framework](https://github.com/danielmiessler/pai) by Daniel Miessler

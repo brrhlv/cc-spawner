@@ -35,7 +35,7 @@
 #
 # Examples:
 #   .\spawner.ps1 spawn Lab4
-#   .\spawner.ps1 spawn Lab4 --template pai-mod --identity developer
+#   .\spawner.ps1 spawn Lab4 --template cc-python --identity developer
 #   .\spawner.ps1 backup --output backups/admin
 #   .\spawner.ps1 export Lab1 --output Lab1-share.zip
 #   .\spawner.ps1 promote Lab1 --as my-template
@@ -388,7 +388,7 @@ function Install-PythonForUser {
     }
 }
 
-# Legacy function for templates that still need Node.js (e.g., pai-vanilla)
+# Legacy function for templates that still need Node.js (e.g., cc-vanilla-legacy)
 function Install-NodeForUser {
     param(
         [string]$Username,
@@ -397,7 +397,7 @@ function Install-NodeForUser {
     )
 
     Write-Log "Node.js installation skipped (legacy templates only)" "WARN"
-    Write-Log "  Use --template pai-vanilla for TypeScript hooks" "INFO"
+    Write-Log "  Use --template cc-vanilla-legacy for npm-based install" "INFO"
     return $false
 }
 
@@ -1217,9 +1217,8 @@ DECOMPOSITION (v3):
     decompose <username> Extract base/identity/project layers
 
 BASE TEMPLATES:
-    cc-vanilla           Stock Claude Code (no PAI)
-    pai-vanilla          Minimal PAI skeleton
-    pai-mod              PAI with hooks framework
+    cc-vanilla           Stock Claude Code - minimal, no hooks (default)
+    cc-python            Claude Code with Python hooks (Anthropic patterns)
 
 IDENTITIES:
     developer            Code quality, TDD, API design
@@ -1253,15 +1252,15 @@ OPTIONS:
 
 EXAMPLES:
     spawner spawn Lab1 --base cc-vanilla
-    spawner spawn Lab2 --base pai-mod --identity developer
+    spawner spawn Lab2 --base cc-python --identity developer
     spawner backup --output backups/admin/my-backup
     spawner restore backups/admin/2026-01-23 --merge
     spawner snapshot Lab1
     spawner export Lab1 --output Lab1-share.zip
     spawner import Lab1-share.zip Lab2
     spawner promote Lab1 --as my-template
-    spawner sync pai-mod --to Lab1,Lab2
-    spawner diff Lab1 pai-mod --detailed
+    spawner sync cc-python --to Lab1,Lab2
+    spawner diff Lab1 cc-python --detailed
     spawner repo init my-template
     spawner publish my-template --repo brrhlv/my-template --private
     spawner clone https://github.com/user/template Lab5

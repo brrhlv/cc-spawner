@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `pre_tool_use.py` - Validate/block dangerous commands
   - `post_tool_use.py` - Auto-format files after edits
 - **Universal Identity System** - Developer, researcher, learner, auditor identities
-- **Legacy Template Preservation** - `cc-vanilla-legacy` and `pai-mod-legacy` for npm-based installs
+- **Legacy Template Preservation** - `cc-vanilla-legacy` for npm-based installs
 
 ### Changed
 - Installation paths updated:

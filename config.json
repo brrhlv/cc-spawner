@@ -92,13 +92,6 @@
       "complexity": "minimal",
       "legacy": true,
       "requiresNode": true
-    },
-    "pai-mod-legacy": {
-      "description": "[LEGACY] PAI with JS hooks - npm-based installation",
-      "path": "templates/pai-mod-legacy/.claude",
-      "complexity": "standard",
-      "legacy": true,
-      "requiresNode": true
     }
   },
   "projects": {

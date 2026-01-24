@@ -4,7 +4,7 @@ Identities define WHO Claude is (skills, personality, agents) - independent of t
 
 ## Key Concept
 
-**Identities work with ANY base template.** PAI features come from the base (pai-mod, pai-full), not the identity.
+**Identities work with ANY base template.** Python hooks come from the base template (cc-python), not the identity.
 
 ## Available Identities
 
@@ -21,11 +21,11 @@ Identities define WHO Claude is (skills, personality, agents) - independent of t
 # Stock Claude Code + developer identity
 spawner spawn Lab1 --base cc-vanilla --identity developer
 
-# PAI framework + researcher identity
-spawner spawn Lab2 --base pai-mod --identity researcher
+# Python hooks + researcher identity
+spawner spawn Lab2 --base cc-python --identity researcher
 
-# Full PAI (identity optional)
-spawner spawn Admin --base pai-full
+# Minimal setup (identity optional)
+spawner spawn Admin --base cc-vanilla
 ```
 
 ## Identity Structure
