@@ -115,9 +115,26 @@ Create separate Windows users with their own Claude Code configurations, skills,
 
 | Template | Description |
 |----------|-------------|
-| `cc-vanilla` | Stock Claude Code - no framework (default) |
+| `cc-vanilla` | Stock Claude Code with security defaults (default) |
 | `pai-vanilla` | Minimal PAI skeleton - basic structure |
 | `pai-mod` | PAI with hooks framework |
+
+### cc-vanilla Security Features
+
+The default `cc-vanilla` template includes security guardrails based on Anthropic best practices:
+
+**Permissions** (convenience, not security boundary):
+- Allow: `npm run/test`, `git status/diff/log/add/commit`
+- Deny: Read/Edit/Write to `.env`, `.env.*`, `secrets/**`, `*.pem`, `*credentials*`
+
+**Hooks** (deterministic blocking via exit code 2):
+- `protect-sensitive-files.sh` - Blocks edits to `.env`, `secrets/`, `.git/`, `.pem`, `credentials`, `.key`
+- `dangerous-command-guard.sh` - Blocks `rm -rf /`, `git push --force`, `DROP TABLE`, etc.
+
+**Project Scaffold**:
+- `~/projects/CLAUDE.md` - Project instructions template
+- `~/projects/.mcp.json` - Empty MCP config for team use
+- `~/projects/README.md` - Getting started guide
 
 ## Identities
 
@@ -256,6 +273,25 @@ When you run `export` or `publish`, configs are automatically sanitized:
 - Session history and cache
 - Local paths and user data
 - Passwords and tokens
+
+## MCP Servers
+
+MCP (Model Context Protocol) servers are **not bundled by default** due to security concerns (43% have vulnerabilities per Anthropic research). Add them as needed:
+
+```bash
+# HTTP transport (recommended)
+claude mcp add --transport http github https://api.githubcopilot.com/mcp/
+
+# stdio transport
+claude mcp add --transport stdio memory -- npx -y @modelcontextprotocol/server-memory
+
+# Windows requires cmd wrapper for stdio
+claude mcp add --transport stdio db -- cmd /c npx -y @bytebase/dbhub
+```
+
+**Tool Search** is automatic - when MCP tools exceed 10% of context, Claude lazy-loads 3-5 relevant tools per query. No configuration needed.
+
+See `docs/MCP-SETUP.md` for detailed setup guide.
 
 ## Creating Custom Identities
 
