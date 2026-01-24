@@ -571,6 +571,17 @@ function Invoke-Spawn {
             Write-Log "  Template not found: $templatePath" "WARN"
         }
 
+        # 6.25. Copy projects scaffold from template (if exists)
+        $projectsScaffold = Join-Path $templateRoot "projects"
+        if (Test-Path $projectsScaffold) {
+            Write-Log "Copying projects scaffold..." "STEP"
+            $robocopyArgs = @($projectsScaffold, "$UserHome\projects", "/E", "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS")
+            $result = Start-Process -FilePath "robocopy.exe" -ArgumentList $robocopyArgs -Wait -PassThru -NoNewWindow
+            if ($result.ExitCode -le 7) {
+                Write-Log "  Projects scaffold created" "OK"
+            }
+        }
+
         # 6.5. Merge identity (if specified)
         if ($Identity) {
             Write-Log "Merging identity: $Identity..." "STEP"
