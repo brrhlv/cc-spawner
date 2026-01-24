@@ -225,16 +225,16 @@ function Get-PasswordForUser {
 }
 
 # ============================================================================
-# DEPENDENCIES MANAGEMENT
+# DEPENDENCIES MANAGEMENT (v4 - Native Claude Code + Python)
 # ============================================================================
 
 function Ensure-Dependencies {
     param($Config)
 
-    $downloadedMarker = Join-Path $DepsPath ".downloaded"
+    $downloadedMarker = Join-Path $DepsPath ".downloaded-v4"
 
     if (Test-Path $downloadedMarker) {
-        Write-Log "Dependencies already cached" "INFO"
+        Write-Log "Dependencies already cached (v4)" "INFO"
         return $true
     }
 
@@ -246,38 +246,149 @@ function Ensure-Dependencies {
 
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-    # Download nvm-noinstall.zip
-    $nvmVersion = $Config.dependencies.nvmVersion
-    $nvmZipUrl = "https://github.com/coreybutler/nvm-windows/releases/download/$nvmVersion/nvm-noinstall.zip"
-    $nvmZipPath = Join-Path $DepsPath "nvm-noinstall.zip"
+    # Disable progress bar for faster downloads
+    $ProgressPreference = 'SilentlyContinue'
+
+    # === Download Claude Code Native Binary ===
+    $claudeConfig = $Config.dependencies.claudeCode
+    $claudeBaseUrl = $claudeConfig.baseUrl
+    $claudePlatform = $claudeConfig.platform
+    $claudeDepPath = Join-Path $DepsPath "claude-code"
+
+    if (-not (Test-Path $claudeDepPath)) {
+        New-Item -ItemType Directory -Path $claudeDepPath -Force | Out-Null
+    }
 
     try {
-        Write-Log "  Downloading nvm-windows $nvmVersion..." "INFO"
-        Invoke-WebRequest -Uri $nvmZipUrl -OutFile $nvmZipPath -UseBasicParsing
+        # Get latest version
+        Write-Log "  Fetching Claude Code version..." "INFO"
+        $versionUrl = "$claudeBaseUrl/latest"
+        $claudeVersion = (Invoke-WebRequest -Uri $versionUrl -UseBasicParsing).Content.Trim()
+        Write-Log "  Latest version: $claudeVersion" "INFO"
+
+        # Download binary
+        $binaryUrl = "$claudeBaseUrl/$claudeVersion/$claudePlatform/claude.exe"
+        $binaryPath = Join-Path $claudeDepPath "claude.exe"
+        Write-Log "  Downloading Claude Code $claudeVersion..." "INFO"
+        Invoke-WebRequest -Uri $binaryUrl -OutFile $binaryPath -UseBasicParsing
+
+        # Download manifest for verification
+        $manifestUrl = "$claudeBaseUrl/$claudeVersion/manifest.json"
+        $manifestPath = Join-Path $claudeDepPath "manifest.json"
+        Invoke-WebRequest -Uri $manifestUrl -OutFile $manifestPath -UseBasicParsing
+
+        # Save version
+        $claudeVersion | Out-File (Join-Path $claudeDepPath ".version") -Encoding UTF8
+
+        Write-Log "  Claude Code cached successfully" "OK"
     } catch {
-        Write-Log "Failed to download nvm-windows: $($_.Exception.Message)" "ERROR"
+        Write-Log "Failed to download Claude Code: $($_.Exception.Message)" "ERROR"
         return $false
     }
 
-    # Download Node.js
-    $nodeVersion = $Config.dependencies.nodeVersion
-    $nodeZipUrl = "https://nodejs.org/dist/v$nodeVersion/node-v$nodeVersion-win-x64.zip"
-    $nodeZipPath = Join-Path $DepsPath "node-v$nodeVersion-win-x64.zip"
+    # === Download Python Embeddable ===
+    $pythonConfig = $Config.dependencies.python
+    $pythonVersion = $pythonConfig.version
+    $pythonBaseUrl = $pythonConfig.baseUrl
+    $pythonDepPath = Join-Path $DepsPath "python"
+
+    if (-not (Test-Path $pythonDepPath)) {
+        New-Item -ItemType Directory -Path $pythonDepPath -Force | Out-Null
+    }
 
     try {
-        Write-Log "  Downloading Node.js $nodeVersion..." "INFO"
-        Invoke-WebRequest -Uri $nodeZipUrl -OutFile $nodeZipPath -UseBasicParsing
+        # Download Python embeddable zip
+        $pythonZipUrl = "$pythonBaseUrl/$pythonVersion/python-$pythonVersion-embed-amd64.zip"
+        $pythonZipPath = Join-Path $pythonDepPath "python-embed.zip"
+        Write-Log "  Downloading Python $pythonVersion embeddable..." "INFO"
+        Invoke-WebRequest -Uri $pythonZipUrl -OutFile $pythonZipPath -UseBasicParsing
+
+        # Download get-pip.py for pip installation
+        $getPipUrl = "https://bootstrap.pypa.io/get-pip.py"
+        $getPipPath = Join-Path $pythonDepPath "get-pip.py"
+        Write-Log "  Downloading get-pip.py..." "INFO"
+        Invoke-WebRequest -Uri $getPipUrl -OutFile $getPipPath -UseBasicParsing
+
+        # Save version
+        $pythonVersion | Out-File (Join-Path $pythonDepPath ".version") -Encoding UTF8
+
+        Write-Log "  Python cached successfully" "OK"
     } catch {
-        Write-Log "Failed to download Node.js: $($_.Exception.Message)" "ERROR"
+        Write-Log "Failed to download Python: $($_.Exception.Message)" "ERROR"
         return $false
     }
 
     # Create marker file
-    "downloaded=$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Out-File $downloadedMarker -Encoding UTF8
+    @"
+downloaded=$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+claude_version=$claudeVersion
+python_version=$pythonVersion
+"@ | Out-File $downloadedMarker -Encoding UTF8
     Write-Log "Dependencies cached successfully" "OK"
     return $true
 }
 
+function Install-PythonForUser {
+    param(
+        [string]$Username,
+        [string]$UserHome,
+        $Config
+    )
+
+    $pythonRoot = "$UserHome\.python"
+    $pythonVersion = $Config.dependencies.python.version
+
+    Write-Log "Installing portable Python for $Username..." "STEP"
+
+    try {
+        # Remove existing and recreate clean
+        if (Test-Path $pythonRoot) { Remove-Item $pythonRoot -Recurse -Force -ErrorAction SilentlyContinue }
+        New-Item -ItemType Directory -Path $pythonRoot -Force | Out-Null
+
+        # Extract Python embeddable
+        $pythonZipPath = Join-Path $DepsPath "python\python-embed.zip"
+        Write-Log "  Extracting Python $pythonVersion..." "INFO"
+        Expand-Archive -Path $pythonZipPath -DestinationPath $pythonRoot -Force
+
+        # Enable site-packages by modifying python*._pth file
+        $pthFile = Get-ChildItem $pythonRoot -Filter "python*._pth" | Select-Object -First 1
+        if ($pthFile) {
+            $pthContent = Get-Content $pthFile.FullName
+            # Uncomment 'import site' line to enable pip
+            $pthContent = $pthContent -replace '^#import site', 'import site'
+            # Add Lib\site-packages
+            $pthContent += "`nLib\site-packages"
+            $pthContent | Out-File $pthFile.FullName -Encoding ASCII -Force
+        }
+
+        # Create Lib\site-packages directory
+        $sitePackages = Join-Path $pythonRoot "Lib\site-packages"
+        New-Item -ItemType Directory -Path $sitePackages -Force | Out-Null
+
+        # Install pip
+        $getPipPath = Join-Path $DepsPath "python\get-pip.py"
+        $pythonExe = Join-Path $pythonRoot "python.exe"
+        Write-Log "  Installing pip..." "INFO"
+        $result = Start-Process -FilePath $pythonExe -ArgumentList "`"$getPipPath`" --no-warn-script-location" -Wait -PassThru -NoNewWindow
+        if ($result.ExitCode -ne 0) {
+            Write-Log "  pip installation returned code $($result.ExitCode)" "WARN"
+        }
+
+        # Create Scripts directory if it doesn't exist (pip should create it)
+        $scriptsPath = Join-Path $pythonRoot "Scripts"
+        if (-not (Test-Path $scriptsPath)) {
+            New-Item -ItemType Directory -Path $scriptsPath -Force | Out-Null
+        }
+
+        Write-Log "  Python installed at $pythonRoot" "OK"
+        return $true
+    } catch {
+        Write-Log "  Failed to install Python: $($_.Exception.Message)" "ERROR"
+        return $false
+    }
+}
+
+# Legacy function for templates that still need Node.js (e.g., pai-vanilla)
 function Install-NodeForUser {
     param(
         [string]$Username,
@@ -285,76 +396,62 @@ function Install-NodeForUser {
         $Config
     )
 
-    $nvmRoot = "$UserHome\AppData\Roaming\nvm"
-    $nodejsPath = "$UserHome\AppData\Roaming\nodejs"
-    $nodeVersion = $Config.dependencies.nodeVersion
+    Write-Log "Node.js installation skipped (legacy templates only)" "WARN"
+    Write-Log "  Use --template pai-vanilla for TypeScript hooks" "INFO"
+    return $false
+}
 
-    Write-Log "Installing portable Node.js for $Username..." "STEP"
+function Install-ClaudeNativeForUser {
+    param(
+        [string]$Username,
+        [string]$UserHome,
+        $Config
+    )
+
+    # Native Claude Code installation paths
+    $localBinPath = "$UserHome\.local\bin"
+    $localSharePath = "$UserHome\.local\share\claude"
+
+    Write-Log "Installing Claude Code (native)..." "STEP"
 
     try {
-        # Ensure parent directories exist
-        $appDataRoaming = "$UserHome\AppData\Roaming"
-        if (-not (Test-Path $appDataRoaming)) {
-            New-Item -ItemType Directory -Path $appDataRoaming -Force | Out-Null
+        # Create .local directories
+        New-Item -ItemType Directory -Path $localBinPath -Force | Out-Null
+        New-Item -ItemType Directory -Path $localSharePath -Force | Out-Null
+
+        # Copy cached binary
+        $cachedBinary = Join-Path $DepsPath "claude-code\claude.exe"
+        $targetBinary = Join-Path $localBinPath "claude.exe"
+
+        if (-not (Test-Path $cachedBinary)) {
+            throw "Cached Claude binary not found at $cachedBinary"
         }
 
-        # Remove existing and recreate clean
-        if (Test-Path $nvmRoot) { Remove-Item $nvmRoot -Recurse -Force -ErrorAction SilentlyContinue }
-        if (Test-Path $nodejsPath) { Remove-Item $nodejsPath -Recurse -Force -ErrorAction SilentlyContinue }
-        New-Item -ItemType Directory -Path $nvmRoot -Force | Out-Null
-        New-Item -ItemType Directory -Path $nodejsPath -Force | Out-Null
+        Write-Log "  Copying Claude Code binary..." "INFO"
+        Copy-Item $cachedBinary -Destination $targetBinary -Force
 
-        # Extract nvm
-        $nvmZipPath = Join-Path $DepsPath "nvm-noinstall.zip"
-        Write-Log "  Extracting nvm-windows..." "INFO"
-        Expand-Archive -Path $nvmZipPath -DestinationPath $nvmRoot -Force
-
-        # Create nvm settings
-        $nvmSettings = @"
-root: $nvmRoot
-path: $nodejsPath
-proxy: none
-"@
-        $nvmSettings | Out-File "$nvmRoot\settings.txt" -Encoding ASCII -Force
-
-        # Extract Node.js to temp then copy (robocopy is more reliable than Move-Item)
-        $nodeZipPath = Join-Path $DepsPath "node-v$nodeVersion-win-x64.zip"
-        $tempNodePath = "$env:TEMP\node-extract-$Username"
-
-        Write-Log "  Extracting Node.js $nodeVersion..." "INFO"
-        if (Test-Path $tempNodePath) { Remove-Item $tempNodePath -Recurse -Force -ErrorAction SilentlyContinue }
-        Expand-Archive -Path $nodeZipPath -DestinationPath $tempNodePath -Force
-
-        # Find the extracted folder (node-v22.12.0-win-x64)
-        $extractedFolder = Get-ChildItem $tempNodePath -Directory | Select-Object -First 1
-        if (-not $extractedFolder) {
-            throw "Could not find extracted Node.js folder in $tempNodePath"
+        # Copy version info
+        $cachedVersion = Join-Path $DepsPath "claude-code\.version"
+        if (Test-Path $cachedVersion) {
+            $version = Get-Content $cachedVersion
+            $version | Out-File (Join-Path $localSharePath "version") -Encoding UTF8 -Force
         }
 
-        # Use robocopy for reliable copying
-        $robocopyArgs = @($extractedFolder.FullName, $nodejsPath, "/MIR", "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS")
-        $result = Start-Process -FilePath "robocopy.exe" -ArgumentList $robocopyArgs -Wait -PassThru -NoNewWindow
-        if ($result.ExitCode -gt 7) {
-            throw "robocopy failed with exit code $($result.ExitCode)"
+        # Verify installation
+        if (Test-Path $targetBinary) {
+            Write-Log "  Claude Code installed at $localBinPath" "OK"
+            return $true
+        } else {
+            Write-Log "  Claude Code binary not found after copy" "WARN"
+            return $false
         }
-
-        # Cleanup temp
-        Remove-Item $tempNodePath -Recurse -Force -ErrorAction SilentlyContinue
-
-        # Also copy to nvm's version folder for compatibility
-        $nvmNodePath = "$nvmRoot\v$nodeVersion"
-        New-Item -ItemType Directory -Path $nvmNodePath -Force | Out-Null
-        $robocopyArgs = @($nodejsPath, $nvmNodePath, "/MIR", "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS")
-        Start-Process -FilePath "robocopy.exe" -ArgumentList $robocopyArgs -Wait -NoNewWindow | Out-Null
-
-        Write-Log "  Node.js installed at $nodejsPath" "OK"
-        return $true
     } catch {
-        Write-Log "  Failed to install Node.js: $($_.Exception.Message)" "ERROR"
+        Write-Log "Failed to install Claude Code: $($_.Exception.Message)" "ERROR"
         return $false
     }
 }
 
+# Legacy function for npm-based installation (deprecated)
 function Install-ClaudeCliForUser {
     param(
         [string]$Username,
@@ -362,46 +459,8 @@ function Install-ClaudeCliForUser {
         $Config
     )
 
-    $nodejsPath = "$UserHome\AppData\Roaming\nodejs"
-    $npmPath = "$nodejsPath\npm.cmd"
-    $npmGlobalPath = "$UserHome\AppData\Roaming\npm"
-
-    Write-Log "Installing Claude Code CLI..." "STEP"
-
-    # Ensure npm global directory exists
-    New-Item -ItemType Directory -Path $npmGlobalPath -Force | Out-Null
-
-    # Create .npmrc to set prefix
-    $npmrc = "prefix=$npmGlobalPath"
-    $npmrc | Out-File "$UserHome\.npmrc" -Encoding UTF8 -Force
-
-    # Run npm install with proper environment
-    $env:PATH = "$nodejsPath;$npmGlobalPath;$env:PATH"
-    $env:npm_config_prefix = $npmGlobalPath
-
-    try {
-        Write-Log "  Running npm install -g @anthropic-ai/claude-code..." "INFO"
-        $result = & $npmPath install -g "@anthropic-ai/claude-code" 2>&1
-
-        # Verify installation
-        $claudePath = Join-Path $npmGlobalPath "claude.cmd"
-        if (Test-Path $claudePath) {
-            Write-Log "  Claude CLI installed successfully" "OK"
-            return $true
-        } else {
-            # Check alternate location
-            $claudePath = Join-Path $npmGlobalPath "node_modules\.bin\claude.cmd"
-            if (Test-Path $claudePath) {
-                Write-Log "  Claude CLI installed successfully" "OK"
-                return $true
-            }
-            Write-Log "  Claude CLI not found after install" "WARN"
-            return $false
-        }
-    } catch {
-        Write-Log "Failed to install Claude CLI: $($_.Exception.Message)" "ERROR"
-        return $false
-    }
+    Write-Log "npm-based installation deprecated - use Install-ClaudeNativeForUser" "WARN"
+    return $false
 }
 
 function Set-UserOwnership {
@@ -413,12 +472,10 @@ function Set-UserOwnership {
     # Set ownership on specific directories only (avoid recursive symlink loops)
     $dirsToOwn = @(
         "$UserHome\.claude",
+        "$UserHome\.local",
+        "$UserHome\.python",
         "$UserHome\projects",
-        "$UserHome\AppData\Roaming\nvm",
-        "$UserHome\AppData\Roaming\nodejs",
-        "$UserHome\AppData\Roaming\npm",
-        "$UserHome\.gitconfig",
-        "$UserHome\.npmrc"
+        "$UserHome\.gitconfig"
     )
 
     foreach ($path in $dirsToOwn) {
@@ -534,19 +591,29 @@ function Invoke-Spawn {
 
         # 3. Create directory structure
         Write-Log "Creating directory structure..." "STEP"
-        $dirs = @("$UserHome\.claude", "$UserHome\projects", "$UserHome\AppData\Roaming\npm")
+        $dirs = @("$UserHome\.claude", "$UserHome\projects", "$UserHome\.local\bin", "$UserHome\.local\share")
         foreach ($dir in $dirs) {
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
         }
         Write-Log "  Directories created" "OK"
 
-        # 4. Install Node.js (portable)
-        if (-not (Install-NodeForUser $Username $UserHome $config)) {
-            throw "Failed to install Node.js"
+        # 4. Install Claude Code (native binary)
+        $claudeInstalled = Install-ClaudeNativeForUser $Username $UserHome $config
+        if (-not $claudeInstalled) {
+            Write-Log "Claude Code installation failed - continuing anyway" "WARN"
         }
 
-        # 5. Install Claude CLI
-        $claudeInstalled = Install-ClaudeCliForUser $Username $UserHome $config
+        # 5. Install Python (if template requires it)
+        $pythonInstalled = $false
+        $templateConfig = $config.templates.$Template
+        if ($templateConfig.requiresPython -eq $true) {
+            $pythonInstalled = Install-PythonForUser $Username $UserHome $config
+            if (-not $pythonInstalled) {
+                Write-Log "Python installation failed - hooks may not work" "WARN"
+            }
+        } else {
+            Write-Log "Skipping Python (template doesn't require it)" "INFO"
+        }
 
         # 6. Validate and copy template
         Write-Log "Validating template: $Template..." "STEP"
@@ -696,12 +763,37 @@ function Invoke-Spawn {
                 $hiveLoaded = $true
             }
 
-            # Set CLAUDE_CONFIG_DIR to user's own .claude directory
+            # Set environment variables
             $envPath = "Registry::HKEY_USERS\$userSid\Environment"
             if (-not (Test-Path $envPath)) {
                 New-Item -Path $envPath -Force | Out-Null
             }
+
+            # CLAUDE_CONFIG_DIR - user's .claude directory
             Set-ItemProperty -Path $envPath -Name "CLAUDE_CONFIG_DIR" -Value "$UserHome\.claude" -Type String
+
+            # PATH - add .local\bin for Claude Code and .python for Python
+            $currentPath = ""
+            try {
+                $currentPath = (Get-ItemProperty -Path $envPath -Name "Path" -ErrorAction SilentlyContinue).Path
+            } catch { }
+
+            $pathsToAdd = @("$UserHome\.local\bin")
+            if ($pythonInstalled) {
+                $pathsToAdd += "$UserHome\.python"
+                $pathsToAdd += "$UserHome\.python\Scripts"
+            }
+
+            foreach ($addPath in $pathsToAdd) {
+                if ($currentPath -notlike "*$addPath*") {
+                    if ($currentPath) {
+                        $currentPath = "$addPath;$currentPath"
+                    } else {
+                        $currentPath = $addPath
+                    }
+                }
+            }
+            Set-ItemProperty -Path $envPath -Name "Path" -Value $currentPath -Type ExpandString
 
             # Unload hive if we loaded it
             if ($hiveLoaded) {
@@ -711,6 +803,7 @@ function Invoke-Spawn {
             }
 
             Write-Log "  CLAUDE_CONFIG_DIR set to $UserHome\.claude" "OK"
+            Write-Log "  PATH updated with .local\bin" "OK"
         } catch {
             Write-Log "  Failed to set env vars: $($_.Exception.Message)" "WARN"
         }
@@ -730,8 +823,9 @@ function Invoke-Spawn {
             created = (Get-Date -Format "yyyy-MM-dd")
             home = $UserHome
             status = "active"
-            nodeInstalled = $true
+            installMethod = "native"  # v4: native installer
             claudeInstalled = $claudeInstalled
+            pythonInstalled = $pythonInstalled
         }
 
         if ($manifest.users -is [PSCustomObject]) {

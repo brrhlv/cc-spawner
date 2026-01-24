@@ -5,7 +5,38 @@ All notable changes to cc-spawner will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.0] - 2025-01-23
+## [4.0.0] - 2026-01-23
+
+### Breaking Changes
+- Removed npm/Node.js dependency for Claude Code installation
+- Claude Code now installed as native binary to `~/.local/bin/`
+- Python embeddable replaces Node.js for hooks
+
+### Added
+- **Native Claude Code Installation** - Downloads and installs native binary directly
+- **Python Hooks Support** - Anthropic-recommended Python hooks pattern
+- **cc-python Template** - New template with sample Python hooks:
+  - `session_start.py` - Inject context at session start
+  - `pre_tool_use.py` - Validate/block dangerous commands
+  - `post_tool_use.py` - Auto-format files after edits
+- **Universal Identity System** - Developer, researcher, learner, auditor identities
+- **Legacy Template Preservation** - `cc-vanilla-legacy` and `pai-mod-legacy` for npm-based installs
+
+### Changed
+- Installation paths updated:
+  - `~/.local/bin/claude.exe` (native binary)
+  - `~/.python/` (embeddable Python, if template requires it)
+- Template structure reorganized with `requiresPython`/`requiresNode` flags
+- Faster dependency downloads with disabled progress bar
+
+### Fixed
+- Download timeouts for large Claude Code binary
+
+### Security
+- Python hooks follow Anthropic's recommended patterns
+- `pre_tool_use.py` blocks dangerous commands (rm -rf /, force push, etc.)
+
+## [3.0.0] - 2026-01-23
 
 ### Added
 

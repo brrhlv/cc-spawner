@@ -1,21 +1,29 @@
 {
-  "version": "3.0",
-  "description": "Spawner v3 - Configuration management, sharing, and user environment system",
+  "version": "4.0",
+  "description": "Spawner v4 - Native Claude Code with Python hooks support",
   "passwordFile": ".passwords.json",
   "defaults": {
-    "template": "cc-vanilla",
-    "nodeVersion": "22"
+    "template": "cc-vanilla"
   },
   "despawn": {
     "backup": true,
     "confirm": true
   },
   "dependencies": {
-    "nvmVersion": "1.2.2",
-    "nodeVersion": "22.12.0"
+    "claudeCode": {
+      "version": "latest",
+      "channel": "stable",
+      "baseUrl": "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases",
+      "platform": "win32-x64"
+    },
+    "python": {
+      "version": "3.12.8",
+      "baseUrl": "https://www.python.org/ftp/python",
+      "embeddable": true
+    }
   },
   "admin": {
-    "configDir": "C:\\Users\\Brizzle\\.claude",
+    "configDir": "C:\\Users\\YourUser\\.claude",
     "backupRetention": 10,
     "autoBackupOnUpgrade": true
   },
@@ -67,19 +75,30 @@
   },
   "templates": {
     "cc-vanilla": {
-      "description": "Stock Claude Code - no PAI, no hooks, no skills",
+      "description": "Stock Claude Code - minimal, no hooks (native install)",
       "path": "templates/cc-vanilla/.claude",
-      "complexity": "minimal"
+      "complexity": "minimal",
+      "requiresPython": false
     },
-    "pai-vanilla": {
-      "description": "Minimal PAI skeleton - basic structure with sample skill",
-      "path": "templates/pai-vanilla/.claude",
-      "complexity": "basic"
+    "cc-python": {
+      "description": "Claude Code with Python hooks - Anthropic patterns",
+      "path": "templates/cc-python/.claude",
+      "complexity": "basic",
+      "requiresPython": true
     },
-    "pai-mod": {
-      "description": "PAI with hooks framework - startup hooks enabled",
-      "path": "templates/pai-mod/.claude",
-      "complexity": "standard"
+    "cc-vanilla-legacy": {
+      "description": "[LEGACY] Stock Claude Code - npm-based installation",
+      "path": "templates/cc-vanilla-legacy/.claude",
+      "complexity": "minimal",
+      "legacy": true,
+      "requiresNode": true
+    },
+    "pai-mod-legacy": {
+      "description": "[LEGACY] PAI with JS hooks - npm-based installation",
+      "path": "templates/pai-mod-legacy/.claude",
+      "complexity": "standard",
+      "legacy": true,
+      "requiresNode": true
     }
   },
   "projects": {
@@ -92,12 +111,12 @@
       "defaultTemplate": "cc-vanilla"
     },
     "dev": {
-      "description": "Development environments - PAI framework for building",
-      "defaultTemplate": "pai-mod"
+      "description": "Development environments - Python hooks for building",
+      "defaultTemplate": "cc-python"
     },
     "work": {
-      "description": "Work environments - PAI with hooks for production work",
-      "defaultTemplate": "pai-mod"
+      "description": "Work environments - Python hooks for production work",
+      "defaultTemplate": "cc-python"
     }
   },
   "identities": {

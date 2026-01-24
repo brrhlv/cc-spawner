@@ -4,7 +4,14 @@ Isolated Claude Code environments with configuration sharing for Windows.
 
 Create separate Windows users with their own Claude Code configurations, skills, and agents. Share configurations via GitHub, sync templates across users, and manage backups - perfect for testing, development, teams, and experimentation.
 
-## What's New in v3
+## What's New in v4
+
+- **Native Claude Code Installation** - No more npm/Node.js dependency
+- **Python Hooks Support** - Anthropic-recommended Python hooks pattern
+- **Faster Downloads** - Optimized binary caching
+- **Cross-Platform Ready** - Path structure compatible with Linux/macOS/WSL
+
+### v3 Features (still available)
 
 - **Admin Backup/Restore** - Backup and restore your main .claude configuration
 - **Export & Share** - Sanitized exports safe for public sharing (secrets removed)
@@ -113,28 +120,31 @@ Create separate Windows users with their own Claude Code configurations, skills,
 
 ## Base Templates
 
+| Template | Description | Python |
+|----------|-------------|--------|
+| `cc-vanilla` | Stock Claude Code - minimal, no hooks (default) | No |
+| `cc-python` | Claude Code with Python hooks (Anthropic patterns) | Yes |
+| `pai-vanilla` | Full PAI skeleton - TypeScript hooks | Node.js |
+
+### Legacy Templates (npm-based, deprecated)
+
 | Template | Description |
 |----------|-------------|
-| `cc-vanilla` | Stock Claude Code with security defaults (default) |
-| `pai-vanilla` | Minimal PAI skeleton - basic structure |
-| `pai-mod` | PAI with hooks framework |
+| `cc-vanilla-legacy` | Stock Claude Code (npm installation) |
+| `pai-mod-legacy` | PAI with JS hooks (npm installation) |
 
-### cc-vanilla Security Features
+### Template Details
 
-The default `cc-vanilla` template includes security guardrails based on Anthropic best practices:
+**cc-vanilla** (default) - Minimal setup:
+- No hooks, no Python required
+- Clean slate for customization
+- Fastest spawn time
 
-**Permissions** (convenience, not security boundary):
-- Allow: `npm run/test`, `git status/diff/log/add/commit`
-- Deny: Read/Edit/Write to `.env`, `.env.*`, `secrets/**`, `*.pem`, `*credentials*`
-
-**Hooks** (deterministic blocking via exit code 2):
-- `protect-sensitive-files.sh` - Blocks edits to `.env`, `secrets/`, `.git/`, `.pem`, `credentials`, `.key`
-- `dangerous-command-guard.sh` - Blocks `rm -rf /`, `git push --force`, `DROP TABLE`, etc.
-
-**Project Scaffold**:
-- `~/projects/CLAUDE.md` - Project instructions template
-- `~/projects/.mcp.json` - Empty MCP config for team use
-- `~/projects/README.md` - Getting started guide
+**cc-python** - Python hooks enabled (Anthropic patterns):
+- `session_start.py` - Inject context at session start
+- `pre_tool_use.py` - Validate/block dangerous commands
+- `post_tool_use.py` - Auto-format files after edits
+- Requires Python (auto-installed by Spawner)
 
 ## Identities
 
@@ -160,8 +170,11 @@ Identities are **universal** - they work with any base template. An identity add
 ### Requirements
 - Windows 10/11
 - Administrator privileges
+- Internet connection (first-time dependency download)
 - Git (for GitHub features)
 - GitHub CLI `gh` (optional, for publish command)
+
+**No Node.js required** - Spawner downloads Claude Code native binary and Python embeddable automatically.
 
 ### Setup
 
@@ -193,27 +206,27 @@ ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
 
 ```json
 {
-  "version": "3.0",
+  "version": "4.0",
   "defaults": {
     "template": "cc-vanilla"
+  },
+  "dependencies": {
+    "claudeCode": {
+      "version": "latest",
+      "channel": "stable"
+    },
+    "python": {
+      "version": "3.12.8",
+      "embeddable": true
+    }
   },
   "admin": {
     "configDir": "C:\\Users\\YourUser\\.claude",
     "backupRetention": 10
   },
-  "backups": {
-    "adminPath": "backups/admin",
-    "usersPath": "backups/users",
-    "exportsPath": "exports"
-  },
-  "github": {
-    "defaultVisibility": "private"
-  },
-  "security": {
-    "sanitize": {
-      "removeFiles": [".env", ".credentials.json"],
-      "redactPatterns": ["sk-ant-api.*", "ghp_.*"]
-    }
+  "templates": {
+    "cc-vanilla": { "requiresPython": false },
+    "cc-python": { "requiresPython": true }
   }
 }
 ```
@@ -223,7 +236,7 @@ ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
 ```
 Spawner/
 ├── spawner.ps1          # Main PowerShell script
-├── config.json          # Configuration
+├── config.json          # Configuration (v4)
 ├── .passwords.json      # Passwords (gitignored)
 ├── manifest.json        # User registry
 ├── identities/          # Universal identities
@@ -232,24 +245,32 @@ Spawner/
 │   ├── learner/
 │   └── auditor/
 ├── templates/           # Base templates
-│   ├── cc-vanilla/
-│   ├── pai-vanilla/
-│   └── pai-mod/
+│   ├── cc-vanilla/      # Default - minimal
+│   ├── cc-python/       # Python hooks
+│   └── pai-vanilla/     # Full PAI (needs Node)
 ├── lib/                 # Helper scripts
-│   ├── Admin-*.ps1      # Admin management
-│   ├── User-*.ps1       # User snapshots
-│   ├── Template-*.ps1   # Template syncing
-│   ├── Config-*.ps1     # Diff/decompose
-│   ├── Git-*.ps1        # Git integration
-│   ├── GitHub-*.ps1     # GitHub sharing
-│   └── templates/       # Template files
 ├── backups/             # Auto-backups
-│   ├── admin/           # Admin backups
-│   └── users/           # User snapshots
 ├── exports/             # Sanitized exports
-├── decomposed/          # Decomposed configs
-├── dependencies/        # Cached installers
+├── dependencies/        # Cached binaries
+│   ├── claude-code/     # Native Claude binary
+│   └── python/          # Python embeddable
 └── logs/                # Operation logs
+```
+
+### Per-User Installation
+
+```
+C:\Users\{Username}\
+├── .local\
+│   ├── bin\claude.exe   # Claude Code native
+│   └── share\claude\    # Version data
+├── .python\             # Python (if template needs it)
+│   ├── python.exe
+│   └── Scripts\pip.exe
+├── .claude\             # Configuration
+│   ├── settings.json
+│   └── hooks\           # Python hooks (cc-python)
+└── projects\            # Project scaffold
 ```
 
 ## Security
@@ -308,12 +329,13 @@ See `identities/README.md` for details.
 **spawn** creates:
 1. Windows local user account
 2. User profile directory
-3. Portable Node.js installation (per-user)
-4. Claude Code CLI via npm
+3. Claude Code native binary (`~/.local/bin/claude.exe`)
+4. Python embeddable (if template requires hooks)
 5. Template .claude directory
 6. Identity merge (if specified)
 7. Git configuration
-8. API key setup
+8. User PATH setup (`.local/bin`, `.python` if needed)
+9. API key setup
 
 **export** sanitizes:
 1. Copies .claude to temp directory
