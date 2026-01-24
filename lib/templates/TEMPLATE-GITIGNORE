@@ -1,0 +1,87 @@
+# ============================================
+# Spawner Template .gitignore
+# CRITICAL: This file protects secrets!
+# ============================================
+
+# ===========================================
+# SESSION DATA - Always exclude
+# ===========================================
+history.jsonl
+agent-sessions.json
+span-sessions.json
+langfuse-span-cache.json
+stats-cache.json
+tool-timing-cache.json
+
+# Directories with session/cache data
+cache/
+logs/
+state/
+telemetry/
+session-env/
+debug/
+temp/
+shell-snapshots/
+paste-cache/
+statsig/
+todos/
+file-history/
+history/
+
+# ===========================================
+# SECRETS - NEVER COMMIT THESE
+# ===========================================
+.env
+.env.*
+!.env.example
+.credentials.json
+api-keys.env
+.passwords.json
+settings.local.json
+*.key
+*.pem
+*_rsa
+*_dsa
+*_ed25519
+*_ecdsa
+
+# ===========================================
+# USER-SPECIFIC - Exclude from templates
+# ===========================================
+.claude.json
+projects/
+
+# ===========================================
+# SPAWNER MANIFESTS
+# ===========================================
+*-manifest.json
+backup-manifest.json
+snapshot-manifest.json
+export-manifest.json
+
+# ===========================================
+# OS & EDITOR FILES
+# ===========================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.sublime-*
+
+# ===========================================
+# LARGE/BINARY FILES
+# ===========================================
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.rar
+node_modules/

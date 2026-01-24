@@ -1,6 +1,6 @@
 {
-  "version": "2.4",
-  "description": "Spawner v2 - User environment management with universal identity system",
+  "version": "3.0",
+  "description": "Spawner v3 - Configuration management, sharing, and user environment system",
   "passwordFile": ".passwords.json",
   "defaults": {
     "template": "cc-vanilla",
@@ -13,6 +13,37 @@
   "dependencies": {
     "nvmVersion": "1.2.2",
     "nodeVersion": "22.12.0"
+  },
+  "admin": {
+    "configDir": "C:\\Users\\Brizzle\\.claude",
+    "backupRetention": 10,
+    "autoBackupOnUpgrade": true
+  },
+  "backups": {
+    "path": "backups",
+    "adminPath": "backups/admin",
+    "usersPath": "backups/users",
+    "exportsPath": "exports",
+    "retentionDays": 30
+  },
+  "git": {
+    "enabled": true,
+    "defaultBranch": "main"
+  },
+  "github": {
+    "defaultVisibility": "private",
+    "templatePrefix": "cc-template-"
+  },
+  "sync": {
+    "excludePaths": ["cache", "session-env", "logs", "state"],
+    "preservePaths": ["TELOS", "memory/long-term"]
+  },
+  "security": {
+    "sanitize": {
+      "removeFiles": [".env", ".credentials.json", "api-keys.env", ".passwords.json", "settings.local.json"],
+      "removeDirs": ["cache", "logs", "state", "telemetry", "session-env", "debug", "temp", "shell-snapshots", "paste-cache", "statsig"],
+      "redactPatterns": ["sk-ant-api0[0-9]-[A-Za-z0-9_-]+", "ghp_[A-Za-z0-9]+", "sk-[A-Za-z0-9]+", "xoxb-[A-Za-z0-9-]+", "xoxp-[A-Za-z0-9-]+"]
+    }
   },
   "validation": {
     "enabled": true,

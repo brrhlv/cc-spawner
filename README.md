@@ -1,16 +1,16 @@
 # Spawner
 
-Isolated Claude Code environments with universal identity system for Windows.
+Isolated Claude Code environments with configuration sharing for Windows.
 
-Create separate Windows users with their own Claude Code configurations, skills, and agents - perfect for testing, development, and experimentation without affecting your main setup.
+Create separate Windows users with their own Claude Code configurations, skills, and agents. Share configurations via GitHub, sync templates across users, and manage backups - perfect for testing, development, teams, and experimentation.
 
-## Features
+## What's New in v3
 
-- **Universal Identity System** - Apply skill sets (developer, researcher, learner, auditor) to any base template
-- **Isolated Environments** - Each user has their own Node.js, npm, and Claude Code installation
-- **Template-Based** - Start from stock Claude Code or PAI framework
-- **Project Copying** - Clone projects into new environments
-- **Automatic Backups** - Backup on respawn/despawn operations
+- **Admin Backup/Restore** - Backup and restore your main .claude configuration
+- **Export & Share** - Sanitized exports safe for public sharing (secrets removed)
+- **GitHub Integration** - Publish templates to GitHub, spawn from URLs
+- **Template Syncing** - Push/pull configurations between templates and users
+- **Config Decomposition** - Separate configs into reusable base/identity/project layers
 
 ## Quick Start
 
@@ -23,17 +23,19 @@ Create separate Windows users with their own Claude Code configurations, skills,
 # Create with PAI framework + developer identity
 .\spawner.ps1 spawn Lab2 --base pai-mod --identity developer
 
-# Create with researcher skills
-.\spawner.ps1 spawn Lab3 --base cc-vanilla --identity researcher
+# Backup your admin config
+.\spawner.ps1 backup
 
-# Reset just the .claude config (keep user)
-.\spawner.ps1 respawn Lab1 --cli
+# Export a user's config for sharing
+.\spawner.ps1 export Lab1 --output Lab1-share.zip
 
-# Delete a user completely
-.\spawner.ps1 despawn Lab1 --force
+# Spawn from a GitHub template
+.\spawner.ps1 clone https://github.com/user/cc-template Lab3
 ```
 
 ## Commands
+
+### User Management
 
 | Command | Purpose | Example |
 |---------|---------|---------|
@@ -42,6 +44,72 @@ Create separate Windows users with their own Claude Code configurations, skills,
 | `despawn` | Delete user and data | `despawn Lab1 --force` |
 | `cospawn` | Copy from another user | `cospawn Lab2 --from Lab1` |
 | `validate` | Validate templates | `validate pai-mod --force` |
+
+### Admin Management (v3)
+
+| Command | Purpose | Example |
+|---------|---------|---------|
+| `backup` | Backup admin's .claude | `backup --output my-backup` |
+| `restore` | Restore from backup | `restore backups/admin/2025-01-23` |
+| `upgrade` | Upgrade from template/git | `upgrade --from pai-mod` |
+
+### User Snapshots (v3)
+
+| Command | Purpose | Example |
+|---------|---------|---------|
+| `snapshot` | Save user's complete state | `snapshot Lab1` |
+| `export` | Export sanitized for sharing | `export Lab1 --output Lab1.zip` |
+| `import` | Import to user | `import Lab1.zip Lab2` |
+
+### Template Syncing (v3)
+
+| Command | Purpose | Example |
+|---------|---------|---------|
+| `promote` | Save user as template | `promote Lab1 --as my-template` |
+| `sync` | Push template to users | `sync pai-mod --to Lab1,Lab2` |
+| `diff` | Compare two configs | `diff Lab1 pai-mod --detailed` |
+
+### Git Integration (v3)
+
+| Command | Purpose | Example |
+|---------|---------|---------|
+| `repo init` | Initialize git for template | `repo init my-template` |
+| `repo status` | Check template git status | `repo status my-template` |
+| `repo commit` | Commit template changes | `repo commit my-template -m "v1.1"` |
+
+### GitHub Sharing (v3)
+
+| Command | Purpose | Example |
+|---------|---------|---------|
+| `publish` | Push template to GitHub | `publish my-template --repo user/repo` |
+| `clone` | Spawn from GitHub URL | `clone https://github.com/user/repo Lab5` |
+
+### Decomposition (v3)
+
+| Command | Purpose | Example |
+|---------|---------|---------|
+| `decompose` | Extract config layers | `decompose Lab1` |
+
+## Sharing Workflow
+
+```powershell
+# 1. Test and refine config in a Lab user
+.\spawner.ps1 spawn Lab1 --base pai-mod --identity developer
+# ... customize, test, iterate ...
+
+# 2. Promote to template
+.\spawner.ps1 promote Lab1 --as my-setup
+
+# 3. Version control it
+.\spawner.ps1 repo init my-setup
+.\spawner.ps1 repo commit my-setup -m "Initial version"
+
+# 4. Publish to GitHub
+.\spawner.ps1 publish my-setup --repo myuser/claude-template
+
+# 5. Share the link - others can spawn from it
+.\spawner.ps1 clone https://github.com/myuser/claude-template Lab1
+```
 
 ## Base Templates
 
@@ -75,7 +143,8 @@ Identities are **universal** - they work with any base template. An identity add
 ### Requirements
 - Windows 10/11
 - Administrator privileges
-- Git Bash (optional, for bash wrapper)
+- Git (for GitHub features)
+- GitHub CLI `gh` (optional, for publish command)
 
 ### Setup
 
@@ -107,25 +176,30 @@ ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
 
 ```json
 {
+  "version": "3.0",
   "defaults": {
     "template": "cc-vanilla"
   },
-  "templates": { ... },
-  "identities": {
-    "available": ["developer", "researcher", "learner", "auditor"]
+  "admin": {
+    "configDir": "C:\\Users\\YourUser\\.claude",
+    "backupRetention": 10
   },
-  "projects": {
-    "myproject": "C:\\path\\to\\project"
+  "backups": {
+    "adminPath": "backups/admin",
+    "usersPath": "backups/users",
+    "exportsPath": "exports"
+  },
+  "github": {
+    "defaultVisibility": "private"
+  },
+  "security": {
+    "sanitize": {
+      "removeFiles": [".env", ".credentials.json"],
+      "redactPatterns": ["sk-ant-api.*", "ghp_.*"]
+    }
   }
 }
 ```
-
-### Password Categories
-
-Users are categorized by name prefix:
-- `Lab*` → lab category
-- `Dev*` → dev category
-- Others → default password
 
 ## Directory Structure
 
@@ -145,10 +219,43 @@ Spawner/
 │   ├── pai-vanilla/
 │   └── pai-mod/
 ├── lib/                 # Helper scripts
-├── dependencies/        # Cached installers
+│   ├── Admin-*.ps1      # Admin management
+│   ├── User-*.ps1       # User snapshots
+│   ├── Template-*.ps1   # Template syncing
+│   ├── Config-*.ps1     # Diff/decompose
+│   ├── Git-*.ps1        # Git integration
+│   ├── GitHub-*.ps1     # GitHub sharing
+│   └── templates/       # Template files
 ├── backups/             # Auto-backups
+│   ├── admin/           # Admin backups
+│   └── users/           # User snapshots
+├── exports/             # Sanitized exports
+├── decomposed/          # Decomposed configs
+├── dependencies/        # Cached installers
 └── logs/                # Operation logs
 ```
+
+## Security
+
+### Export Sanitization
+
+When you run `export` or `publish`, configs are automatically sanitized:
+
+1. **Removed**: `.env`, `.credentials.json`, `api-keys.env`, session data
+2. **Redacted**: API keys (Anthropic, GitHub, OpenAI, Slack patterns)
+3. **Replaced**: Hardcoded paths → `{USER_HOME}` placeholders
+4. **Validated**: Final check ensures no secrets remain
+
+```powershell
+# Safe to share publicly
+.\spawner.ps1 export Lab1 --output Lab1-public.zip
+```
+
+### What's Never Shared
+- API keys and credentials
+- Session history and cache
+- Local paths and user data
+- Passwords and tokens
 
 ## Creating Custom Identities
 
@@ -172,27 +279,19 @@ See `identities/README.md` for details.
 7. Git configuration
 8. API key setup
 
-**respawn --cli** resets just the .claude directory without recreating the user.
+**export** sanitizes:
+1. Copies .claude to temp directory
+2. Removes secret files
+3. Redacts inline secrets
+4. Replaces hardcoded paths
+5. Validates no secrets remain
+6. Creates zip archive
 
-**despawn** removes the user, home directory, and manifest entry.
-
-## Security Notes
-
-- `.passwords.json` is gitignored - never commit passwords
-- API keys stored in `_config/api-keys.env` (gitignored)
-- Each spawned user is isolated from others
-- Validate API key format before use
-
-## Contributing
-
-### Adding Identities
-See `identities/README.md` for the identity structure.
-
-### Adding Templates
-1. Create `templates/my-template/.claude/`
-2. Add `settings.json` with proper schema
-3. Register in `config.json` templates section
-4. Run `.\spawner.ps1 validate my-template`
+**publish** to GitHub:
+1. Validates template has git
+2. Runs security check
+3. Creates/updates GitHub repo
+4. Pushes with auto-generated README
 
 ## License
 

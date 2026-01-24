@@ -1,30 +1,71 @@
-# spawner.ps1 - Spawner v2: Simplified User Environment Management
-# Usage: .\spawner.ps1 <command> <username> [options]
+# spawner.ps1 - Spawner v3: Configuration Management and Sharing Platform
+# Usage: .\spawner.ps1 <command> [target] [options]
 #
-# Commands:
+# User Management Commands:
 #   spawn <username>              Create ready-to-use user
 #   respawn <username>            Recreate user fresh (or --cli for config only)
 #   despawn <username>            Delete user
 #   cospawn <username> --from <source>  Copy from another user
 #   validate [template]           Validate templates (all or specific)
 #
+# Admin Management (v3):
+#   backup                        Backup admin's .claude directory
+#   restore <backup-path>         Restore admin from backup
+#   upgrade [--from template|url] Upgrade admin config from template/git
+#
+# User Snapshots (v3):
+#   snapshot <username>           Save user's complete state
+#   export <username>             Export sanitized config for sharing
+#   import <path> <username>      Import snapshot/export to user
+#
+# Template Syncing (v3):
+#   promote <username> --as <name>  Save user's .claude as new template
+#   sync <template> --to <users>    Push template to users
+#   diff <source> <target>          Compare two configs
+#
+# Git Integration (v3):
+#   repo init|status|commit <template>  Manage git for templates
+#
+# GitHub Sharing (v3):
+#   publish <template> --repo <owner/repo>  Push template to GitHub
+#   clone <github-url> <username>           Spawn from GitHub URL
+#
+# Decomposition (v3):
+#   decompose <username>          Extract base/identity/project layers
+#
 # Examples:
 #   .\spawner.ps1 spawn Lab4
-#   .\spawner.ps1 spawn Lab4 --template pai-clone
-#   .\spawner.ps1 respawn Lab4 --cli
-#   .\spawner.ps1 despawn Lab4 --force
-#   .\spawner.ps1 cospawn Lab5 --from Lab4
-#   .\spawner.ps1 validate                    # Validate all templates
-#   .\spawner.ps1 validate pai-snapshot       # Validate specific template
+#   .\spawner.ps1 spawn Lab4 --template pai-mod --identity developer
+#   .\spawner.ps1 backup --output backups/admin
+#   .\spawner.ps1 export Lab1 --output Lab1-share.zip
+#   .\spawner.ps1 promote Lab1 --as my-template
+#   .\spawner.ps1 publish my-template --repo brrhlv/my-template
+#   .\spawner.ps1 clone https://github.com/user/template Lab5
 
 param(
     [Parameter(Position=0)]
-    [ValidateSet("spawn", "respawn", "despawn", "cospawn", "validate", "help")]
+    [ValidateSet(
+        # Existing commands
+        "spawn", "respawn", "despawn", "cospawn", "validate", "help",
+        # v3: Admin Management
+        "backup", "restore", "upgrade",
+        # v3: User Snapshots
+        "snapshot", "export", "import",
+        # v3: Template Syncing
+        "promote", "sync", "diff",
+        # v3: Git Integration
+        "repo",
+        # v3: GitHub Sharing
+        "publish", "clone",
+        # v3: Decomposition
+        "decompose"
+    )]
     [string]$Command = "help",
 
     [Parameter(Position=1)]
     [string]$Username,
 
+    # Existing params
     [Alias("Base")]
     [string]$Template,
     [string]$Identity,
@@ -36,7 +77,19 @@ param(
     [switch]$Force,
     [switch]$NoBackup,
     [switch]$Quiet,
-    [switch]$Help
+    [switch]$Help,
+
+    # v3 params
+    [string]$Output,              # Output path for backup/snapshot/export
+    [switch]$IncludeSecrets,      # Include secrets (dangerous, admin backup only)
+    [switch]$Merge,               # Merge instead of replace on restore/import
+    [string]$Preserve,            # Paths to preserve (comma-separated)
+    [string]$As,                  # Template name for promote
+    [string]$To,                  # Target users for sync (comma-separated)
+    [switch]$Detailed,            # Detailed output for diff
+    [string]$Repo,                # GitHub repo (owner/name)
+    [switch]$Private,             # Private GitHub repo
+    [string]$Message              # Commit message for repo command
 )
 
 $ErrorActionPreference = "Stop"
@@ -1021,24 +1074,49 @@ function Invoke-Cospawn {
 function Show-Help {
     Write-Host @"
 
-Spawner v2 - Universal Identity System
+Spawner v3 - Configuration Management and Sharing Platform
 
 USAGE:
-    spawner <command> <username> [options]
+    spawner <command> [target] [options]
 
-COMMANDS:
+USER MANAGEMENT:
     spawn <username>     Create ready-to-use user environment
     respawn <username>   Recreate user (full) or reset config (--cli)
     despawn <username>   Delete user and all data
     cospawn <username>   Copy environment from another user
     validate [template]  Validate templates
 
+ADMIN MANAGEMENT (v3):
+    backup               Backup admin's .claude directory
+    restore <path>       Restore admin from backup
+    upgrade              Upgrade admin from template or git URL
+
+USER SNAPSHOTS (v3):
+    snapshot <username>  Save user's complete state
+    export <username>    Export sanitized config for sharing
+    import <path> <user> Import snapshot/export to user
+
+TEMPLATE SYNCING (v3):
+    promote <user>       Save user's .claude as new template (--as <name>)
+    sync <template>      Push/pull between template and users
+    diff <source> <tgt>  Compare two configs
+
+GIT INTEGRATION (v3):
+    repo <action> <tpl>  init|status|commit for templates
+
+GITHUB SHARING (v3):
+    publish <template>   Push template to GitHub (--repo <owner/name>)
+    clone <url> <user>   Spawn from GitHub URL
+
+DECOMPOSITION (v3):
+    decompose <username> Extract base/identity/project layers
+
 BASE TEMPLATES:
     cc-vanilla           Stock Claude Code (no PAI)
     pai-vanilla          Minimal PAI skeleton
     pai-mod              PAI with hooks framework
 
-IDENTITIES (universal - work with any base):
+IDENTITIES:
     developer            Code quality, TDD, API design
     researcher           Search and summarize
     learner              Education and tutoring
@@ -1046,24 +1124,43 @@ IDENTITIES (universal - work with any base):
 
 OPTIONS:
     --base <name>        Base template (alias: --template)
-    --identity <name>    Apply identity (skills, agents, hooks)
+    --identity <name>    Apply identity overlay
     --projects <list>    Copy projects (comma-separated)
     --password <pass>    Override default password
-    --from <user>        Source user for cospawn
+    --from <user>        Source user for cospawn/sync
     --cli                Respawn: only reset .claude directory
-    --full               Cospawn: copy full profile (not just .claude)
+    --full               Cospawn: copy full profile
     --force              Skip confirmation prompts
     --no-backup          Skip automatic backups
     --quiet              Suppress output (logs only)
 
+    # v3 options
+    --output <path>      Output path for backup/snapshot/export
+    --include-secrets    Include secrets in backup (admin only, dangerous)
+    --merge              Merge instead of replace on restore/import
+    --preserve <paths>   Paths to preserve (comma-separated)
+    --as <name>          Template name for promote
+    --to <users>         Target users for sync (comma-separated)
+    --detailed           Detailed output for diff
+    --repo <owner/name>  GitHub repo for publish
+    --private            Make GitHub repo private
+    --message <msg>      Commit message for repo command
+
 EXAMPLES:
     spawner spawn Lab1 --base cc-vanilla
     spawner spawn Lab2 --base pai-mod --identity developer
-    spawner spawn Lab3 --base pai-mod --projects myproject
-    spawner respawn Lab4 --cli
-    spawner despawn Lab4 --force
-    spawner cospawn Lab5 --from Lab4
-    spawner validate pai-mod --force
+    spawner backup --output backups/admin/my-backup
+    spawner restore backups/admin/2026-01-23 --merge
+    spawner snapshot Lab1
+    spawner export Lab1 --output Lab1-share.zip
+    spawner import Lab1-share.zip Lab2
+    spawner promote Lab1 --as my-template
+    spawner sync pai-mod --to Lab1,Lab2
+    spawner diff Lab1 pai-mod --detailed
+    spawner repo init my-template
+    spawner publish my-template --repo brrhlv/my-template --private
+    spawner clone https://github.com/user/template Lab5
+    spawner decompose Lab1
 
 "@ -ForegroundColor Cyan
 }
@@ -1156,6 +1253,7 @@ function Invoke-ValidateTemplates {
 # ============================================================================
 
 switch ($Command) {
+    # ===== Existing Commands =====
     "spawn" {
         Invoke-Spawn -Username $Username -Template $Template -Identity $Identity -Projects $Projects -Password $Password
     }
@@ -1171,6 +1269,129 @@ switch ($Command) {
     "validate" {
         Invoke-ValidateTemplates -TemplateName $Username -AutoFix:$Force
     }
+
+    # ===== v3: Admin Management =====
+    "backup" {
+        $script = Join-Path $SpawnerRoot "lib\Admin-Backup.ps1"
+        if (Test-Path $script) {
+            & $script -Config (Get-Config) -SpawnerRoot $SpawnerRoot -Output $Output -IncludeSecrets:$IncludeSecrets
+        } else {
+            Write-Log "Admin-Backup.ps1 not found" "ERROR"
+        }
+    }
+    "restore" {
+        $script = Join-Path $SpawnerRoot "lib\Admin-Restore.ps1"
+        if (Test-Path $script) {
+            & $script -Config (Get-Config) -SpawnerRoot $SpawnerRoot -BackupPath $Username -Merge:$Merge -Force:$Force
+        } else {
+            Write-Log "Admin-Restore.ps1 not found" "ERROR"
+        }
+    }
+    "upgrade" {
+        $script = Join-Path $SpawnerRoot "lib\Admin-Upgrade.ps1"
+        if (Test-Path $script) {
+            $preserveList = if ($Preserve) { $Preserve -split "," } else { @() }
+            & $script -Config (Get-Config) -SpawnerRoot $SpawnerRoot -From $From -Preserve $preserveList
+        } else {
+            Write-Log "Admin-Upgrade.ps1 not found" "ERROR"
+        }
+    }
+
+    # ===== v3: User Snapshots =====
+    "snapshot" {
+        $script = Join-Path $SpawnerRoot "lib\User-Snapshot.ps1"
+        if (Test-Path $script) {
+            & $script -Config (Get-Config) -SpawnerRoot $SpawnerRoot -Username $Username -Output $Output -Full:$Full
+        } else {
+            Write-Log "User-Snapshot.ps1 not found" "ERROR"
+        }
+    }
+    "export" {
+        $script = Join-Path $SpawnerRoot "lib\User-Export.ps1"
+        if (Test-Path $script) {
+            & $script -Config (Get-Config) -SpawnerRoot $SpawnerRoot -Username $Username -Output $Output
+        } else {
+            Write-Log "User-Export.ps1 not found" "ERROR"
+        }
+    }
+    "import" {
+        $script = Join-Path $SpawnerRoot "lib\User-Import.ps1"
+        if (Test-Path $script) {
+            # Username is the path, Template is the target user
+            & $script -Config (Get-Config) -SpawnerRoot $SpawnerRoot -ImportPath $Username -TargetUser $Template -Merge:$Merge
+        } else {
+            Write-Log "User-Import.ps1 not found" "ERROR"
+        }
+    }
+
+    # ===== v3: Template Syncing =====
+    "promote" {
+        $script = Join-Path $SpawnerRoot "lib\Template-Promote.ps1"
+        if (Test-Path $script) {
+            & $script -Config (Get-Config) -SpawnerRoot $SpawnerRoot -Username $Username -TemplateName $As
+        } else {
+            Write-Log "Template-Promote.ps1 not found" "ERROR"
+        }
+    }
+    "sync" {
+        $script = Join-Path $SpawnerRoot "lib\Template-Sync.ps1"
+        if (Test-Path $script) {
+            $targetUsers = if ($To) { $To -split "," } else { @() }
+            & $script -Config (Get-Config) -SpawnerRoot $SpawnerRoot -TemplateName $Username -ToUsers $targetUsers -FromUser $From
+        } else {
+            Write-Log "Template-Sync.ps1 not found" "ERROR"
+        }
+    }
+    "diff" {
+        $script = Join-Path $SpawnerRoot "lib\Config-Diff.ps1"
+        if (Test-Path $script) {
+            & $script -Config (Get-Config) -SpawnerRoot $SpawnerRoot -Source $Username -Target $Template -Detailed:$Detailed
+        } else {
+            Write-Log "Config-Diff.ps1 not found" "ERROR"
+        }
+    }
+
+    # ===== v3: Git Integration =====
+    "repo" {
+        $script = Join-Path $SpawnerRoot "lib\Git-Repo.ps1"
+        if (Test-Path $script) {
+            # Username is the action (init/status/commit), Template is the template name
+            & $script -Config (Get-Config) -SpawnerRoot $SpawnerRoot -Action $Username -TemplateName $Template -Message $Message
+        } else {
+            Write-Log "Git-Repo.ps1 not found" "ERROR"
+        }
+    }
+
+    # ===== v3: GitHub Sharing =====
+    "publish" {
+        $script = Join-Path $SpawnerRoot "lib\GitHub-Publish.ps1"
+        if (Test-Path $script) {
+            & $script -Config (Get-Config) -SpawnerRoot $SpawnerRoot -TemplateName $Username -Repo $Repo -Private:$Private
+        } else {
+            Write-Log "GitHub-Publish.ps1 not found" "ERROR"
+        }
+    }
+    "clone" {
+        $script = Join-Path $SpawnerRoot "lib\GitHub-Clone.ps1"
+        if (Test-Path $script) {
+            # Username is the GitHub URL, Template is the target username
+            & $script -Config (Get-Config) -SpawnerRoot $SpawnerRoot -GitHubUrl $Username -TargetUser $Template -Identity $Identity
+        } else {
+            Write-Log "GitHub-Clone.ps1 not found" "ERROR"
+        }
+    }
+
+    # ===== v3: Decomposition =====
+    "decompose" {
+        $script = Join-Path $SpawnerRoot "lib\Config-Decompose.ps1"
+        if (Test-Path $script) {
+            & $script -Config (Get-Config) -SpawnerRoot $SpawnerRoot -Username $Username -Output $Output
+        } else {
+            Write-Log "Config-Decompose.ps1 not found" "ERROR"
+        }
+    }
+
+    # ===== Help =====
     "help" {
         Show-Help
     }
