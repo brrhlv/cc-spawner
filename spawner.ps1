@@ -6,6 +6,8 @@
 #   respawn <username>            Recreate user fresh (or --cli for config only)
 #   despawn <username>            Delete user
 #   cospawn <username> --from <source>  Copy from another user
+#   login <username>              Launch Claude as user (alias: launch)
+#   shell <username>              Open shell as user
 #   validate [template]           Validate templates (all or specific)
 #
 # Admin Management (v3):
@@ -46,7 +48,7 @@ param(
     [Parameter(Position=0)]
     [ValidateSet(
         # Existing commands
-        "spawn", "respawn", "despawn", "cospawn", "validate", "help",
+        "spawn", "respawn", "despawn", "cospawn", "validate", "launch", "login", "shell", "help",
         # v3: Admin Management
         "backup", "restore", "upgrade",
         # v3: User Snapshots
@@ -1189,6 +1191,8 @@ USER MANAGEMENT:
     respawn <username>   Recreate user (full) or reset config (--cli)
     despawn <username>   Delete user and all data
     cospawn <username>   Copy environment from another user
+    login <username>     Launch Claude Code as user (alias: launch)
+    shell <username>     Open shell as user
     validate [template]  Validate templates
 
 ADMIN MANAGEMENT (v3):
@@ -1372,6 +1376,75 @@ switch ($Command) {
     }
     "validate" {
         Invoke-ValidateTemplates -TemplateName $Username -AutoFix:$Force
+    }
+    { $_ -in "launch", "login" } {
+        # Launch Claude Code as the specified user in their home directory
+        # "login" is an alias for "launch"
+        if (-not $Username) {
+            Write-Host "Usage: spawner launch <username>" -ForegroundColor Red
+            exit 1
+        }
+        $UserHome = "C:\Users\$Username"
+
+        # Check if user exists
+        $user = Get-LocalUser -Name $Username -ErrorAction SilentlyContinue
+        if (-not $user) {
+            Write-Host "User not found: $Username" -ForegroundColor Red
+            exit 1
+        }
+
+        # Get actual profile path from registry
+        $userSid = $user.SID.Value
+        $profilePath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$userSid"
+        if (Test-Path $profilePath) {
+            $UserHome = (Get-ItemProperty $profilePath).ProfileImagePath
+        }
+
+        $claudePath = "$UserHome\.local\bin\claude.exe"
+        if (-not (Test-Path $claudePath)) {
+            Write-Host "Claude not installed for $Username at $claudePath" -ForegroundColor Red
+            exit 1
+        }
+
+        Write-Host ""
+        Write-Host "Launching Claude Code as $Username..." -ForegroundColor Cyan
+        Write-Host "Home: $UserHome" -ForegroundColor Gray
+        Write-Host ""
+
+        # Launch Claude in user's home directory (PowerShell window)
+        $psCmd = "Set-Location '$UserHome'; & '$claudePath'"
+        & runas /user:$Username "powershell -NoExit -Command $psCmd"
+    }
+    "shell" {
+        # Open a shell as the specified user in their home directory
+        if (-not $Username) {
+            Write-Host "Usage: spawner shell <username>" -ForegroundColor Red
+            exit 1
+        }
+        $UserHome = "C:\Users\$Username"
+
+        # Check if user exists
+        $user = Get-LocalUser -Name $Username -ErrorAction SilentlyContinue
+        if (-not $user) {
+            Write-Host "User not found: $Username" -ForegroundColor Red
+            exit 1
+        }
+
+        # Get actual profile path from registry
+        $userSid = $user.SID.Value
+        $profilePath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$userSid"
+        if (Test-Path $profilePath) {
+            $UserHome = (Get-ItemProperty $profilePath).ProfileImagePath
+        }
+
+        Write-Host ""
+        Write-Host "Opening shell as $Username..." -ForegroundColor Cyan
+        Write-Host "Home: $UserHome" -ForegroundColor Gray
+        Write-Host "Type 'claude' to start Claude Code" -ForegroundColor Gray
+        Write-Host ""
+
+        # Open PowerShell in user's home directory
+        & runas /user:$Username "powershell -NoExit -Command Set-Location '$UserHome'"
     }
 
     # ===== v3: Admin Management =====
